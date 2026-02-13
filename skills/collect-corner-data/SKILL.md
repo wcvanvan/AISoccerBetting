@@ -67,7 +67,7 @@ Notable absences: [injured/suspended players]
 
 === HEAD-TO-HEAD (past 2 seasons) ===
 #  | Date     | Venue   | Comp   | [TeamA] Formation | [TeamA] Line-up | [TeamB] Formation | [TeamB] Line-up | [TeamA] Won | [TeamB] Won | Total | Result
-1  | DD/MM/YY | [venue] | [comp] | [formation] | [lineup] | [formation] | [lineup] | X | X | X | X-X
+1  | DD/MM/YY | [home of which team] | [comp] | [formation] | [lineup] | [formation] | [lineup] | X | X | X | X-X
 2  | ...
 ...
 H2H avg total corners: X.X
