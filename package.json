@@ -1,0 +1,35 @@
+{
+  "name": "espn-corner-data-collector",
+  "version": "1.0.0",
+  "description": "API-based system for collecting soccer corner kick data from ESPN",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "espn-corner-collector": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "start": "ts-node src/cli.ts"
+  },
+  "keywords": [
+    "espn",
+    "soccer",
+    "corners",
+    "data-collector"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "fast-check": "^3.15.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "ts-node": "^10.9.0"
+  }
+}
