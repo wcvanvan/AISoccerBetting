@@ -9,7 +9,7 @@ import { TeamIDResolver } from '../resolver/team-id-resolver';
 import { MatchCollector } from './match-collector';
 import { MatchDetailExtractor } from '../extractor';
 import { H2HAnalyzer } from '../analyzer';
-import { OutputFormatter } from '../formatter';
+import { MarkdownFormatter } from '../formatter';
 import { MatchDetails, H2HMatch } from '../types';
 import { CollectorConfig } from '../config';
 
@@ -24,6 +24,7 @@ export interface CornerDataCollectorInput {
   matchNewsSummary?: string;
 }
 
+
 /**
  * Main orchestrator class that wires all components together
  */
@@ -34,7 +35,7 @@ export class CornerDataCollector {
   private matchCollector: MatchCollector;
   private detailExtractor: MatchDetailExtractor;
   private h2hAnalyzer: H2HAnalyzer;
-  private formatter: OutputFormatter;
+  private markdownFormatter: MarkdownFormatter;
   private alerts: string[];
 
   constructor(config?: CollectorConfig) {
@@ -51,15 +52,15 @@ export class CornerDataCollector {
     this.matchCollector = new MatchCollector(this.apiClient, this.leagueManager);
     this.detailExtractor = new MatchDetailExtractor(this.apiClient);
     this.h2hAnalyzer = new H2HAnalyzer(this.apiClient);
-    this.formatter = new OutputFormatter();
+    this.markdownFormatter = new MarkdownFormatter();
     this.alerts = [];
   }
 
   /**
-   * Collect corner data for two teams
+   * Collect corner data for two teams and return a Markdown-formatted report.
    *
    * @param input - Team names and match date (YYYY-MM-DD)
-   * @returns Formatted output string
+   * @returns Markdown string ready to write to a .md file
    */
   async collect_data(input: CornerDataCollectorInput): Promise<string> {
     this.alerts = [];
@@ -84,6 +85,22 @@ export class CornerDataCollector {
       matchNewsSummary: input.matchNewsSummary?.trim() || undefined,
     };
 
+    const format = (
+      teamA_matches: MatchDetails[],
+      teamB_matches: MatchDetails[],
+      h2h_matches: H2HMatch[]
+    ): string =>
+      this.markdownFormatter.format_output(
+        normalizedInput.teamA_name,
+        normalizedInput.teamB_name,
+        normalizedInput.match_date,
+        teamA_matches,
+        teamB_matches,
+        h2h_matches,
+        this.alerts,
+        normalizedInput.matchNewsSummary
+      );
+
     try {
       const teamA_id = await this.resolveTeamID(normalizedInput.teamA_name, 'Team A');
       const teamB_id = await this.resolveTeamID(normalizedInput.teamB_name, 'Team B');
@@ -98,29 +115,11 @@ export class CornerDataCollector {
         normalizedInput.teamB_name
       );
 
-      return this.formatter.format_output(
-        normalizedInput.teamA_name,
-        normalizedInput.teamB_name,
-        normalizedInput.match_date,
-        teamA_matches,
-        teamB_matches,
-        h2h_matches,
-        this.alerts,
-        normalizedInput.matchNewsSummary
-      );
+      return format(teamA_matches, teamB_matches, h2h_matches);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);
-      return this.formatter.format_output(
-        normalizedInput.teamA_name,
-        normalizedInput.teamB_name,
-        normalizedInput.match_date,
-        [],
-        [],
-        [],
-        this.alerts,
-        normalizedInput.matchNewsSummary
-      );
+      return format([], [], []);
     }
   }
 

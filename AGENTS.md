@@ -49,7 +49,7 @@ CLI (src/cli.ts)
 
 ## Output
 
-Stdout only. Sections: header → Team A last 10 → Team B last 10 → H2H → match news & lineup → alerts.
+Stdout only. Sections: header → Team A last 10 → Team B last 10 → H2H → Live match news → alerts.
 
 ## Skills (Claude Code / Cursor Agent)
 

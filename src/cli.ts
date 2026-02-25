@@ -5,6 +5,7 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
 import { config as loadEnv } from 'dotenv';
 
 // Load shared defaults first, then local secrets (local wins on conflicts)
@@ -122,6 +123,14 @@ Notes:
 }
 
 /**
+ * Build a safe filename for the Markdown report, e.g. "atalanta-vs-dortmund-2026-02-25.md"
+ */
+function buildMarkdownFilename(teamA: string, teamB: string, date: string): string {
+  const slug = (s: string) => s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  return `${slug(teamA)}-vs-${slug(teamB)}-${date}.md`;
+}
+
+/**
  * Main CLI entry point
  */
 async function main(): Promise<void> {
@@ -149,14 +158,17 @@ async function main(): Promise<void> {
       }
     }
 
-    const output = await collector.collect_data({
+    const markdown = await collector.collect_data({
       teamA_name: args.teamA,
       teamB_name: args.teamB,
       match_date: args.date,
       matchNewsSummary,
     });
 
-    console.log(output);
+    const mdFilename = buildMarkdownFilename(args.teamA, args.teamB, args.date);
+    fs.writeFileSync(mdFilename, markdown, 'utf8');
+    console.log(`Markdown report saved → ${mdFilename}`);
+
     process.exit(0);
   } catch (error) {
     console.error('\n❌ ERROR: Failed to collect data\n');

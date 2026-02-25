@@ -2,4 +2,4 @@
  * Formatter module exports
  */
 
-export * from './output-formatter';
+export * from './markdown-formatter';
