@@ -20,7 +20,8 @@ export class OutputFormatter {
     teamA_matches: MatchDetails[],
     teamB_matches: MatchDetails[],
     h2h_matches: H2HMatch[],
-    alerts: string[]
+    alerts: string[],
+    matchNewsSummary?: string
   ): string {
     const sections: string[] = [];
 
@@ -42,6 +43,13 @@ export class OutputFormatter {
     if (h2h_matches.length > 0) {
       sections.push(`Head-to-Head (Last 2 Seasons):`);
       sections.push(this.formatH2HMatches(h2h_matches, teamA_name, teamB_name));
+      sections.push('');
+    }
+
+    // Match news & lineup (optional)
+    if (matchNewsSummary && matchNewsSummary.trim()) {
+      sections.push('Match news & lineup');
+      sections.push(matchNewsSummary.trim());
       sections.push('');
     }
 

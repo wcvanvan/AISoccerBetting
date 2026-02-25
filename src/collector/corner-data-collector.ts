@@ -20,6 +20,8 @@ export interface CornerDataCollectorInput {
   teamA_name: string;
   teamB_name: string;
   match_date: string;
+  /** Optional match news summary; when set, appended to report before Alerts */
+  matchNewsSummary?: string;
 }
 
 /**
@@ -79,6 +81,7 @@ export class CornerDataCollector {
       teamA_name,
       teamB_name,
       match_date,
+      matchNewsSummary: input.matchNewsSummary?.trim() || undefined,
     };
 
     try {
@@ -102,7 +105,8 @@ export class CornerDataCollector {
         teamA_matches,
         teamB_matches,
         h2h_matches,
-        this.alerts
+        this.alerts,
+        normalizedInput.matchNewsSummary
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -114,7 +118,8 @@ export class CornerDataCollector {
         [],
         [],
         [],
-        this.alerts
+        this.alerts,
+        normalizedInput.matchNewsSummary
       );
     }
   }

@@ -4,8 +4,19 @@
  * CLI interface for ESPN Corner Data Collector
  */
 
+import * as path from 'path';
+import { config as loadEnv } from 'dotenv';
+
+// Load shared defaults first, then local secrets (local wins on conflicts)
+loadEnv({ path: path.join(process.cwd(), '.env.defaults') });
+loadEnv({ path: path.join(process.cwd(), '.env'), override: true });
+
+import { configureAnthropicProxy } from './agent/configure-proxy';
 import { CornerDataCollector } from './collector';
 import { ConfigLoader } from './config';
+import { runMatchNews } from './agent';
+
+configureAnthropicProxy();
 
 /**
  * Parse command-line arguments
@@ -126,10 +137,23 @@ async function main(): Promise<void> {
     const config = configLoader.getConfig();
     const collector = new CornerDataCollector(config);
 
+    let matchNewsSummary: string | undefined;
+    const useMatchNews =
+      process.env.MATCH_NEWS_FETCHING === 'true' || process.env.MATCH_NEWS_FETCHING === '1';
+    if (useMatchNews) {
+      try {
+        matchNewsSummary = await runMatchNews(args.teamA, args.teamB, args.date);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Match news skipped: ${msg}`);
+      }
+    }
+
     const output = await collector.collect_data({
       teamA_name: args.teamA,
       teamB_name: args.teamB,
       match_date: args.date,
+      matchNewsSummary,
     });
 
     console.log(output);
