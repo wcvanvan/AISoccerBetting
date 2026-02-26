@@ -1,113 +1,137 @@
-# Atalanta vs Dortmund
+# Wolverhampton vs Aston Villa
 
-**Match Date:** 2026-02-25 | **Data Source:** ESPN API
-
----
-
-## Atalanta — Last 10 Matches
-
-**1. 2026-02-22 vs Napoli** · Italian Serie A · Home · Formation: 3-4-2-1 · Corners: 6–1 (Total 7) · Goals: 2:1
-Lineup: Marco Carnesecchi, Isak Hien, Sead Kolasinac _(sub off 84')_, Giorgio Scalvini _(sub off 69')_, Mario Pasalic, Marten de Roon, Davide Zappacosta, Raoul Bellanova _(sub off 57')_, Nikola Krstovic _(sub off 57')_, Nicola Zalewski, Kamaldeen Sulemana _(sub off 45')_, Berat Djimsiti _(sub on 69')_, Lorenzo Bernasconi _(sub on 57')_, Gianluca Scamacca _(sub on 57')_, Lazar Samardzic _(sub on 45')_, Honest Ahanor _(sub on 84')_
-
-**2. 2026-02-17 vs Borussia Dortmund** · UEFA Champions League - 1st Leg · Away · Formation: 3-4-2-1 · Corners: 2–3 (Total 5) · Goals: 0:2
-Lineup: Marco Carnesecchi, Berat Djimsiti _(sub off 45')_, Sead Kolasinac, Odilon Kossounou, Éderson, Marten de Roon _(sub off 63')_, Lorenzo Bernasconi, Davide Zappacosta _(sub off 72')_, Gianluca Scamacca _(sub off 45')_, Nicola Zalewski _(sub off 82')_, Mario Pasalic, Raoul Bellanova _(sub on 72')_, Nikola Krstovic _(sub on 45')_, Lazar Samardzic _(sub on 82')_, Isak Hien _(sub on 45')_, Kamaldeen Sulemana _(sub on 63')_
-
-**3. 2026-02-14 vs Lazio** · Italian Serie A · Away · Formation: 3-4-2-1 · Corners: 4–5 (Total 9) · Goals: 2:0
-Lineup: Marco Carnesecchi, Berat Djimsiti, Honest Ahanor _(sub off 25')_, Giorgio Scalvini _(sub off 45')_, Éderson, Marten de Roon, Lorenzo Bernasconi, Davide Zappacosta _(sub off 83')_, Nikola Krstovic, Nicola Zalewski _(sub off 70')_, Lazar Samardzic _(sub off 45')_, Odilon Kossounou _(sub on 45')_, Sead Kolasinac _(sub on 25')_, Giacomo Raspadori _(sub on 45')_, Raoul Bellanova _(sub on 83')_, Kamaldeen Sulemana _(sub on 70')_
-
-**4. 2026-02-09 vs Cremonese** · Italian Serie A · Home · Formation: 3-4-2-1 · Corners: 13–2 (Total 15) · Goals: 2:1
-Lineup: Marco Carnesecchi, Berat Djimsiti, Sead Kolasinac _(sub off 59')_, Giorgio Scalvini, Éderson, Mario Pasalic, Nicola Zalewski _(sub off 70')_, Davide Zappacosta _(sub off 59')_, Nikola Krstovic, Giacomo Raspadori _(sub off 78')_, Lazar Samardzic _(sub off 70')_, Kamaldeen Sulemana _(sub on 70')_, Odilon Kossounou _(sub on 59')_, Yunus Musah _(sub on 78')_, Lorenzo Bernasconi _(sub on 70')_, Raoul Bellanova _(sub on 59')_
-
-**5. 2026-02-01 vs Como** · Italian Serie A · Away · Formation: 3-4-2-1 · Corners: 1–7 (Total 8) · Goals: 0:0
-Lineup: Marco Carnesecchi, Berat Djimsiti, Honest Ahanor, Giorgio Scalvini, Éderson, Marten de Roon, Lorenzo Bernasconi, Davide Zappacosta, Gianluca Scamacca _(sub off 18')_, Nicola Zalewski _(sub off 45')_, Charles De Ketelaere _(sub off 60')_, Nikola Krstovic _(sub on 60')_, Kamaldeen Sulemana _(sub on 18')_, Raoul Bellanova _(sub on 45')_, Odilon Kossounou _(sub on 86')_
-
-**6. 2026-01-28 vs Union St.-Gilloise** · UEFA Champions League · Away · Formation: 3-4-2-1 · Corners: 6–0 (Total 6) · Goals: 0:1
-Lineup: Marco Sportiello, Isak Hien, Honest Ahanor, Odilon Kossounou _(sub off 74')_, Éderson, Yunus Musah _(sub off 52')_, Lorenzo Bernasconi, Davide Zappacosta, Nikola Krstovic _(sub off 61')_, Ademola Lookman _(sub off 51')_, Lazar Samardzic _(sub off 52')_, Marten de Roon _(sub on 52')_, Mario Pasalic _(sub on 74')_, Gianluca Scamacca _(sub on 61')_, Kamaldeen Sulemana _(sub on 51')_, Charles De Ketelaere _(sub on 52')_
-
-**7. 2026-01-25 vs Parma** · Italian Serie A · Home · Formation: 3-4-2-1 · Corners: 6–9 (Total 15) · Goals: 4:0
-Lineup: Marco Carnesecchi, Berat Djimsiti _(sub off 45')_, Honest Ahanor, Giorgio Scalvini, Éderson, Marten de Roon _(sub off 79')_, Nicola Zalewski _(sub off 61')_, Davide Zappacosta, Gianluca Scamacca _(sub off 61')_, Giacomo Raspadori, Charles De Ketelaere _(sub off 72')_, Nikola Krstovic _(sub on 61')_, Ademola Lookman _(sub on 79')_, Isak Hien _(sub on 45')_, Mario Pasalic _(sub on 72')_, Lorenzo Bernasconi _(sub on 61')_
-
-**8. 2026-01-21 vs Athletic Club** · UEFA Champions League · Home · Formation: 3-4-2-1 · Corners: 5–2 (Total 7) · Goals: 2:3
-Lineup: Marco Carnesecchi, Berat Djimsiti, Sead Kolasinac _(sub off 76')_, Odilon Kossounou, Éderson, Marten de Roon, Lorenzo Bernasconi _(sub off 82')_, Davide Zappacosta _(sub off 76')_, Gianluca Scamacca _(sub off 66')_, Nicola Zalewski _(sub off 65')_, Charles De Ketelaere, Kamaldeen Sulemana _(sub on 82')_, Ademola Lookman _(sub on 65')_, Nikola Krstovic _(sub on 66')_, Lazar Samardzic _(sub on 76')_, Honest Ahanor _(sub on 76')_
-
-**9. 2026-01-16 vs Pisa** · Italian Serie A · Away · Formation: 3-4-2-1 · Corners: 1–10 (Total 11) · Goals: 1:1
-Lineup: Marco Carnesecchi, Isak Hien, Honest Ahanor, Giorgio Scalvini _(sub off 70')_, Mario Pasalic _(sub off 56')_, Marten de Roon, Lorenzo Bernasconi, Yunus Musah _(sub off 56')_, Gianluca Scamacca _(sub off 56')_, Nicola Zalewski _(sub off 81')_, Charles De Ketelaere, Kamaldeen Sulemana _(sub on 81')_, Giacomo Raspadori _(sub on 56')_, Nikola Krstovic _(sub on 70')_, Davide Zappacosta _(sub on 56')_, Éderson _(sub on 56')_
-
-**10. 2026-01-10 vs Torino** · Italian Serie A · Home · Formation: 3-4-2-1 · Corners: 5–4 (Total 9) · Goals: 2:0
-Lineup: Marco Carnesecchi, Berat Djimsiti _(sub off 44')_, Honest Ahanor, Giorgio Scalvini _(sub off 67')_, Éderson, Marten de Roon, Lorenzo Bernasconi, Davide Zappacosta, Nikola Krstovic _(sub off 67')_, Nicola Zalewski _(sub off 79')_, Charles De Ketelaere _(sub off 79')_, Isak Hien _(sub on 44')_, Lazar Samardzic _(sub on 79')_, Gianluca Scamacca _(sub on 67')_, Yunus Musah _(sub on 67')_, Mario Pasalic _(sub on 79')_
-
-## Dortmund — Last 10 Matches
-
-**1. 2026-02-21 vs RB Leipzig** · German Bundesliga · Away · Formation: 3-4-2-1 · Corners: 2–6 (Total 8) · Goals: 2:2
-Lineup: Gregor Kobel, Waldemar Anton, Ramy Bensebaini, Luca Reggiani _(sub off 64')_, Felix Nmecha _(sub off 65')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson, Serhou Guirassy _(sub off 71')_, Maximilian Beier _(sub off 64')_, Marcel Sabitzer _(sub off 76')_, Karim Adeyemi _(sub on 76')_, Carney Chukwuemeka _(sub on 65')_, Fábio Silva _(sub on 71')_, Julian Brandt _(sub on 64')_, Yan Couto _(sub on 64')_
-
-**2. 2026-02-17 vs Atalanta** · UEFA Champions League - 1st Leg · Home · Formation: 3-4-2-1 · Corners: 3–2 (Total 5) · Goals: 2:0
-Lineup: Gregor Kobel, Waldemar Anton, Ramy Bensebaini, Luca Reggiani, Felix Nmecha _(sub off 83')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson, Serhou Guirassy _(sub off 83')_, Julian Brandt _(sub off 70')_, Maximilian Beier _(sub off 70')_, Karim Adeyemi _(sub on 70')_, Marcel Sabitzer _(sub on 83')_, Carney Chukwuemeka _(sub on 70')_, Fábio Silva _(sub on 83')_
-
-**3. 2026-02-13 vs Mainz** · German Bundesliga · Home · Formation: 3-4-2-1 · Corners: 7–2 (Total 9) · Goals: 4:0
-Lineup: Gregor Kobel, Waldemar Anton, Ramy Bensebaini, Niklas Süle _(sub off 45')_, Felix Nmecha _(sub off 74')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson, Serhou Guirassy _(sub off 74')_, Julian Brandt _(sub off 61')_, Maximilian Beier _(sub off 61')_, Marcel Sabitzer _(sub on 74')_, Fábio Silva _(sub on 61')_, Carney Chukwuemeka _(sub on 61')_, Karim Adeyemi _(sub on 74')_, Luca Reggiani _(sub on 45')_
-
-**4. 2026-02-07 vs VfL Wolfsburg** · German Bundesliga · Away · Formation: 3-4-2-1 · Corners: 8–4 (Total 12) · Goals: 2:1
-Lineup: Gregor Kobel, Waldemar Anton, Nico Schlotterbeck, Niklas Süle _(sub off 88')_, Felix Nmecha _(sub off 88')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson _(sub off 69')_, Serhou Guirassy, Maximilian Beier _(sub off 90'+5')_, Julian Brandt _(sub off 88')_, Ramy Bensebaini _(sub on 88')_, Carney Chukwuemeka _(sub on 88')_, Salih Özcan _(sub on 88')_, Fábio Silva _(sub on 69')_, Luca Reggiani _(sub on 90'+5')_
-
-**5. 2026-02-01 vs 1. FC Heidenheim 1846** · German Bundesliga · Home · Formation: 3-4-2-1 · Corners: 13–3 (Total 16) · Goals: 3:2
-Lineup: Gregor Kobel, Waldemar Anton, Nico Schlotterbeck, Filippo Mané _(sub off 45')_, Felix Nmecha, Jobe Bellingham _(sub off 58')_, Daniel Svensson, Yan Couto _(sub off 58')_, Serhou Guirassy _(sub off 90'+3')_, Julian Brandt, Karim Adeyemi _(sub off 69')_, Maximilian Beier _(sub on 58')_, Salih Özcan _(sub on 90'+3')_, Fábio Silva _(sub on 69')_, Niklas Süle _(sub on 45')_, Carney Chukwuemeka _(sub on 58')_
-
-**6. 2026-01-28 vs Internazionale** · UEFA Champions League · Home · Formation: 3-4-2-1 · Corners: 5–3 (Total 8) · Goals: 0:2
-Lineup: Gregor Kobel, Emre Can, Nico Schlotterbeck, Filippo Mané _(sub off 89')_, Jobe Bellingham, Felix Nmecha, Ramy Bensebaini _(sub off 82')_, Julian Ryerson, Serhou Guirassy _(sub off 68')_, Fábio Silva _(sub off 81')_, Maximilian Beier, Yan Couto _(sub on 89')_, Julian Brandt _(sub on 82')_, Karim Adeyemi _(sub on 68')_, Carney Chukwuemeka _(sub on 81')_
-
-**7. 2026-01-24 vs 1. FC Union Berlin** · German Bundesliga · Away · Formation: 3-4-2-1 · Corners: 2–7 (Total 9) · Goals: 3:0
-Lineup: Gregor Kobel, Waldemar Anton, Nico Schlotterbeck, Emre Can _(sub off 69')_, Felix Nmecha _(sub off 90'+3')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson _(sub off 90'+3')_, Serhou Guirassy, Fábio Silva _(sub off 79')_, Maximilian Beier, Salih Özcan _(sub on 90'+3')_, Filippo Mané _(sub on 90'+3')_, Aaron Anselmino _(sub on 69')_, Carney Chukwuemeka _(sub on 79')_
-
-**8. 2026-01-20 vs Tottenham Hotspur** · UEFA Champions League · Away · Formation: 3-4-2-1 · Corners: 2–4 (Total 6) · Goals: 0:2
-Lineup: Gregor Kobel, Nico Schlotterbeck, Ramy Bensebaini, Waldemar Anton, Felix Nmecha _(sub off 64')_, Jobe Bellingham, Daniel Svensson, Yan Couto _(sub off 76')_, Serhou Guirassy _(sub off 45')_, Julian Brandt _(sub off 45')_, Karim Adeyemi _(sub off 64')_, Fábio Silva _(sub on 64')_, Maximilian Beier _(sub on 76')_, Emre Can _(sub on 45')_, Julian Ryerson _(sub on 45')_, Carney Chukwuemeka _(sub on 64')_
-
-**9. 2026-01-17 vs St. Pauli** · German Bundesliga · Home · Formation: 3-4-2-1 · Corners: 5–5 (Total 10) · Goals: 3:2
-Lineup: Gregor Kobel, Waldemar Anton, Nico Schlotterbeck, Emre Can, Felix Nmecha _(sub off 83')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson _(sub off 71')_, Fábio Silva _(sub off 71')_, Julian Brandt _(sub off 83')_, Karim Adeyemi _(sub off 71')_, Carney Chukwuemeka _(sub on 83')_, Serhou Guirassy _(sub on 71')_, Maximilian Beier _(sub on 71')_, Salih Özcan _(sub on 83')_, Yan Couto _(sub on 71')_
-
-**10. 2026-01-13 vs Werder Bremen** · German Bundesliga · Home · Formation: 3-4-2-1 · Corners: 3–3 (Total 6) · Goals: 3:0
-Lineup: Gregor Kobel, Waldemar Anton, Nico Schlotterbeck, Niklas Süle _(sub off 45')_, Felix Nmecha, Marcel Sabitzer, Julian Ryerson _(sub off 67')_, Yan Couto, Fábio Silva _(sub off 84')_, Carney Chukwuemeka _(sub off 67')_, Maximilian Beier _(sub off 67')_, Jobe Bellingham _(sub on 67')_, Karim Adeyemi _(sub on 84')_, Daniel Svensson _(sub on 67')_, Emre Can _(sub on 45')_, Serhou Guirassy _(sub on 67')_
-
-## Head-to-Head (Last 2 Seasons)
-
-**2026-02-17 · Dortmund Home** · UEFA Champions League - 1st Leg · Corners: Atalanta 2, Dortmund 3 (Total 5) · Goals: 0:2
-Atalanta (3-4-2-1): Marco Carnesecchi, Berat Djimsiti _(sub off 45')_, Sead Kolasinac, Odilon Kossounou, Éderson, Marten de Roon _(sub off 63')_, Lorenzo Bernasconi, Davide Zappacosta _(sub off 72')_, Gianluca Scamacca _(sub off 45')_, Nicola Zalewski _(sub off 82')_, Mario Pasalic, Raoul Bellanova _(sub on 72')_, Nikola Krstovic _(sub on 45')_, Lazar Samardzic _(sub on 82')_, Isak Hien _(sub on 45')_, Kamaldeen Sulemana _(sub on 63')_
-Dortmund (3-4-2-1): Gregor Kobel, Waldemar Anton, Ramy Bensebaini, Luca Reggiani, Felix Nmecha _(sub off 83')_, Jobe Bellingham, Daniel Svensson, Julian Ryerson, Serhou Guirassy _(sub off 83')_, Julian Brandt _(sub off 70')_, Maximilian Beier _(sub off 70')_, Karim Adeyemi _(sub on 70')_, Marcel Sabitzer _(sub on 83')_, Carney Chukwuemeka _(sub on 70')_, Fábio Silva _(sub on 83')_
-
-## Live Match News
-
-Here is the summarized match news and lineup block for **Atalanta vs Borussia Dortmund – 25 February 2026, 17:45 UTC | New Balance Arena, Bergamo | UEFA Champions League Knockout Round Play-offs, 2nd Leg (Dortmund lead 2-0 on aggregate)**:
+Date: 2026-02-27 | Source: ESPN API
 
 ---
 
-**Lineup & absences (Atalanta)**
+## Wolverhampton — Last 10
 
-- **Formation & Possible XI:** 3-4-2-1 – Carnesecchi; Scalvini, Hien (or Djimsiti), Kolasinac; Zappacosta, De Roon, Éderson (or Pašalić), Zalewski (or Bellanova); Pašalić, Sulemana; Krstovic (or Scamacca) (per WhoScored – https://www.whoscored.com/matches/1967251/preview/europe-champions-league-2025-2026-atalanta-borussia-dortmund; corroborated by SI.com – https://www.si.com/soccer/atalanta-vs-borussia-dortmund-preview-predictions-lineups-2-25-26 and The Hard Tackle – https://thehardtackle.com/round-up/2026/02/25/atalanta-vs-borussia-dortmund-preview-and-prediction/)
+1. 2026-02-22 vs Crystal Palace · English Premier League · Away · 3-4-2-1 · Corners: 3w-7c (10) · 0:1
+   XI: José Sá, Santiago Bueno, Ladislav Krejcí, Yerson Mosquera (off 90'+2'), André, Jean-Ricner Bellegarde (off 87'), Hugo Bueno, Jackson Tchatchoua, Tolu Arokodare, Mateus Mané, Adam Armstrong (off 63') | Subs: Angel Gomes (on 90'+2'), David Møller Wolfe (on 63'), João Gomes (on 87')
+2. 2026-02-18 vs Arsenal · English Premier League · Home · 3-4-2-1 · Corners: 1w-3c (4) · 2:2
+   XI: José Sá, Santiago Bueno, Ladislav Krejcí, Yerson Mosquera, André, Angel Gomes (off 22'), Hugo Bueno, Jackson Tchatchoua (off 70'), Adam Armstrong, Mateus Mané, Jean-Ricner Bellegarde (off 84') | Subs: Tolu Arokodare (on 22'), Rodrigo Gomes (on 70'), Tom Edozie (on 84')
+3. 2026-02-15 vs Grimsby Town · English FA Cup · Away · 3-5-2 · Corners: -w--c (-) · 1:0
+   XI: Sam Johnstone, Santiago Bueno, Ladislav Krejcí, Yerson Mosquera, Mateus Mané, João Gomes, André (off 89'), David Møller Wolfe, Jackson Tchatchoua, Adam Armstrong, Tolu Arokodare | Subs: Jean-Ricner Bellegarde (on 89')
+4. 2026-02-11 vs Nottingham Forest · English Premier League · Away · 3-4-1-2 · Corners: 2w-8c (10) · 0:0
+   XI: José Sá, Santiago Bueno, Ladislav Krejcí, Yerson Mosquera, João Gomes, Angel Gomes (off 78'), Mateus Mané, Hugo Bueno (off 60'), Rodrigo Gomes (off 60'), Adam Armstrong, Tolu Arokodare | Subs: Jean-Ricner Bellegarde (on 78'), Jackson Tchatchoua (on 60'), David Møller Wolfe (on 60')
+5. 2026-02-07 vs Chelsea · English Premier League · Home · 4-2-3-1 · Corners: 3w-4c (7) · 1:3
+   XI: José Sá, Santiago Bueno, Yerson Mosquera, Hugo Bueno, Matt Doherty (off 45'), Mateus Mané, Angel Gomes (off 79'), João Gomes (off 90'+1'), Tolu Arokodare, Adam Armstrong, Hwang Hee-Chan (off 43') | Subs: Jean-Ricner Bellegarde (on 79'), Rodrigo Gomes (on 45'), Ladislav Krejcí (on 43'), Pedro Lima (on 90'+1')
+6. 2026-01-31 vs AFC Bournemouth · English Premier League · Home · 3-5-2 · Corners: 5w-6c (11) · 0:2
+   XI: José Sá, Santiago Bueno (off 89'), Emmanuel Agbadou, Yerson Mosquera, Mateus Mané, João Gomes, André (off 80'), Hugo Bueno (off 89'), Rodrigo Gomes (off 71'), Hwang Hee-Chan (off 70'), Tolu Arokodare | Subs: Jean-Ricner Bellegarde (on 71'), Jhon Arias (on 80'), Pedro Lima (on 89'), David Møller Wolfe (on 89'), Jørgen Strand Larsen (on 70')
+7. 2026-01-24 vs Manchester City · English Premier League · Away · 3-5-2 · Corners: 6w-4c (10) · 0:2
+   XI: José Sá, Santiago Bueno, Ladislav Krejcí, Yerson Mosquera, Jhon Arias (off 45'), João Gomes, André, Hugo Bueno, Jackson Tchatchoua (off 45'), Hwang Hee-Chan (off 71'), Mateus Mané | Subs: Tolu Arokodare (on 71'), Rodrigo Gomes (on 45'), Jørgen Strand Larsen (on 45')
+8. 2026-01-18 vs Newcastle United · English Premier League · Home · 3-5-2 · Corners: 4w-7c (11) · 0:0
+   XI: José Sá, Santiago Bueno, Ladislav Krejcí, Yerson Mosquera, Mateus Mané, João Gomes (off 71'), André, Hugo Bueno, Jackson Tchatchoua, Hwang Hee-Chan (off 85'), Tolu Arokodare (off 65') | Subs: Jhon Arias (on 71'), Rodrigo Gomes (on 85'), Jørgen Strand Larsen (on 65')
+9. 2026-01-10 vs Shrewsbury Town · English FA Cup · Home · 3-5-2 · Corners: -w--c (-) · 6:1
+   XI: Sam Johnstone, Santiago Bueno, Ladislav Krejcí, Matt Doherty, João Gomes (off 61'), Jhon Arias (off 84'), André, David Møller Wolfe, Jackson Tchatchoua (off 60'), Jørgen Strand Larsen (off 74'), Hwang Hee-Chan (off 74') | Subs: Rodrigo Gomes (on 60'), Fernando López (on 74'), Mateus Mané (on 61'), Pedro Lima (on 84'), Tolu Arokodare (on 74')
+10. 2026-01-07 vs Everton · English Premier League · Away · 3-5-2 · Corners: 7w-2c (9) · 1:1
+   XI: José Sá, Santiago Bueno, Ladislav Krejcí (off 67'), Yerson Mosquera, Mateus Mané, Jhon Arias (off 45'), João Gomes, Hugo Bueno, Jackson Tchatchoua, Hwang Hee-Chan (off 90'+5'), Tolu Arokodare | Subs: Pedro Lima (on 90'+5'), André (on 45'), Jørgen Strand Larsen (on 67')
+
+## Aston Villa — Last 10
+
+1. 2026-02-21 vs Leeds United · English Premier League · Home · 4-2-3-1 · Corners: 7w-2c (9) · 1:1
+   XI: Emiliano Martínez, Tyrone Mings, Ezri Konsa, Ian Maatsen, Matty Cash (off 87'), Morgan Rogers, Douglas Luiz (off 87'), Amadou Onana (off 61'), Ollie Watkins, Emiliano Buendía (off 75'), Leon Bailey (off 61') | Subs: Ross Barkley (on 61'), Tammy Abraham (on 75'), Andrés García (on 87'), Lamare Bogarde (on 87'), Jadon Sancho (on 61')
+2. 2026-02-14 vs Newcastle United · English FA Cup · Home · 4-2-3-1 · Corners: 6w-6c (12) · 1:3
+   XI: Marco Bizot, Pau Torres, Victor Lindelöf, Lucas Digne, Lamare Bogarde, Ross Barkley (off 65'), Douglas Luiz (off 78'), Amadou Onana, Tammy Abraham (off 65'), Morgan Rogers (off 77'), Leon Bailey (off 45'+4') | Subs: Ian Maatsen (on 77'), Emiliano Martínez (on 45'+4'), Ollie Watkins (on 65'), Jadon Sancho (on 78'), Emiliano Buendía (on 65')
+3. 2026-02-11 vs Brighton & Hove Albion · English Premier League · Home · 4-2-3-1 · Corners: 7w-5c (12) · 1:0
+   XI: Emiliano Martínez, Tyrone Mings, Ezri Konsa, Ian Maatsen, Lamare Bogarde, Morgan Rogers, Douglas Luiz (off 84'), Amadou Onana (off 75'), Ollie Watkins (off 74'), Emiliano Buendía (off 60'), Jadon Sancho (off 60') | Subs: Ross Barkley (on 60'), Leon Bailey (on 60'), Tammy Abraham (on 75'), Alysson (on 74'), Victor Lindelöf (on 84')
+4. 2026-02-07 vs AFC Bournemouth · English Premier League · Away · 4-2-3-1 · Corners: 4w-11c (15) · 1:1
+   XI: Emiliano Martínez, Tyrone Mings, Ezri Konsa, Lucas Digne (off 86'), Matty Cash, Morgan Rogers, Douglas Luiz (off 77'), Amadou Onana, Ollie Watkins (off 86'), Emiliano Buendía (off 66'), Jadon Sancho (off 77') | Subs: Lamare Bogarde (on 86'), Tammy Abraham (on 86'), Ian Maatsen (on 77'), Ross Barkley (on 77'), Leon Bailey (on 66')
+5. 2026-02-01 vs Brentford · English Premier League · Home · 4-2-3-1 · Corners: 12w-1c (13) · 0:1
+   XI: Emiliano Martínez, Pau Torres, Ezri Konsa, Ian Maatsen, Matty Cash, Morgan Rogers, Lamare Bogarde (off 45'), Douglas Luiz, Tammy Abraham, Emiliano Buendía, Jadon Sancho (off 77') | Subs: Harvey Elliott (on 77'), Leon Bailey (on 45')
+6. 2026-01-29 vs RB Salzburg · UEFA Europa League · Home · 4-2-3-1 · Corners: 4w-2c (6) · 3:2
+   XI: Emiliano Martínez, Tyrone Mings, Victor Lindelöf, Lucas Digne, Lamare Bogarde, Harvey Elliott, George Hemmings (off 45'), Amadou Onana (off 66'), Ollie Watkins (off 35'), Emiliano Buendía (off 66'), Jadon Sancho (off 78') | Subs: Jamaldeen Jimoh (on 66'), Ezri Konsa (on 66'), Kadan Young (on 78'), Morgan Rogers (on 35'), Matty Cash (on 45')
+7. 2026-01-25 vs Newcastle United · English Premier League · Away · 4-2-3-1 · Corners: 5w-6c (11) · 2:0
+   XI: Emiliano Martínez, Pau Torres (off 75'), Ezri Konsa, Ian Maatsen, Matty Cash, Morgan Rogers, Youri Tielemans (off 74'), Amadou Onana (off 89'), Ollie Watkins, Emiliano Buendía (off 75'), Jadon Sancho (off 59') | Subs: Victor Lindelöf (on 89'), Tyrone Mings (on 75'), Lamare Bogarde (on 74'), Leon Bailey (on 59'), Lucas Digne (on 75')
+8. 2026-01-22 vs Fenerbahce · UEFA Europa League · Away · 4-2-3-1 · Corners: 5w-5c (10) · 1:0
+   XI: Marco Bizot, Tyrone Mings, Victor Lindelöf, Lucas Digne, Matty Cash (off 75'), Morgan Rogers (off 75'), Youri Tielemans (off 90'+2'), Lamare Bogarde, Ollie Watkins, Emiliano Buendía (off 75'), Jadon Sancho (off 75') | Subs: Ian Maatsen (on 75'), George Hemmings (on 90'+2'), Andrés García (on 75'), Evann Guessand (on 75'), Amadou Onana (on 75')
+9. 2026-01-18 vs Everton · English Premier League · Home · 4-2-3-1 · Corners: 6w-4c (10) · 0:1
+   XI: Emiliano Martínez, Pau Torres, Ezri Konsa, Ian Maatsen (off 73'), Matty Cash, Morgan Rogers, Youri Tielemans, Lamare Bogarde (off 73'), Ollie Watkins, Emiliano Buendía, John McGinn (off 18') | Subs: George Hemmings (on 73'), Evann Guessand (on 18'), Lucas Digne (on 73')
+10. 2026-01-10 vs Tottenham Hotspur · English FA Cup · Away · 4-2-3-1 · Corners: -w--c (-) · 2:1
+   XI: Marco Bizot, Pau Torres, Ezri Konsa, Ian Maatsen (off 78'), Matty Cash (off 79'), Morgan Rogers, Lamare Bogarde, Boubacar Kamara (off 9'), Donyell Malen (off 65'), Emiliano Buendía, John McGinn (off 65') | Subs: Andrés García (on 79'), Ollie Watkins (on 65'), Youri Tielemans (on 9'), Lucas Digne (on 78'), Jadon Sancho (on 65')
+
+## H2H (Last 2 Seasons)
+
+2025-11-30 · Aston Villa Home · English Premier League · Corners: Wolverhampton 3, Aston Villa 7 (10) · 0:1
+Wolverhampton (3-4-3): Sam Johnstone, Emmanuel Agbadou, Toti Gomes, Yerson Mosquera (off 77'), João Gomes, André, David Møller Wolfe (off 77'), Jackson Tchatchoua, Jørgen Strand Larsen, Jean-Ricner Bellegarde (off 69'), Jhon Arias (off 87') | Subs: Mateus Mané (on 77'), Hugo Bueno (on 77'), Tolu Arokodare (on 87'), Tawanda Chirewa (on 69')
+Aston Villa (4-2-3-1): Emiliano Martínez, Pau Torres, Ezri Konsa, Lucas Digne, Matty Cash, Morgan Rogers, Youri Tielemans (off 75'), Boubacar Kamara (off 88'), Donyell Malen (off 75'), Emiliano Buendía (off 54'), John McGinn | Subs: Jadon Sancho (on 88'), Ollie Watkins (on 54'), Amadou Onana (on 75'), Ross Barkley (on 75'), Lamare Bogarde (on 88')
+
+2025-02-01 · Wolverhampton Home · English Premier League · Corners: Wolverhampton 5, Aston Villa 8 (13) · 2:0
+Wolverhampton (3-4-2-1): José Sá, Emmanuel Agbadou, Toti Gomes, Matt Doherty, Jean-Ricner Bellegarde (off 88'), André, Rayan Aït-Nouri (off 73'), Nélson Semedo, Gonçalo Guedes (off 73'), Matheus Cunha, Pablo Sarabia (off 79') | Subs: Rodrigo Gomes (on 73'), Santiago Bueno (on 88'), Tommy Doyle (on 73'), Hwang Hee-Chan (on 79')
+Aston Villa (4-2-3-1): Emiliano Martínez, Boubacar Kamara, Ezri Konsa, Lucas Digne (off 45'), Andrés García (off 45'), John McGinn, Youri Tielemans, Lamare Bogarde (off 83'), Ollie Watkins (off 45'), Jacob Ramsey (off 45'), Morgan Rogers | Subs: Leon Bailey (on 45'), Donyell Malen (on 45'), Ian Maatsen (on 45'), Kosta Nedeljkovic (on 83'), Amadou Onana (on 45')
+
+2024-09-21 · Aston Villa Home · English Premier League · Corners: Wolverhampton 5, Aston Villa 6 (11) · 1:3
+Wolverhampton (4-1-4-1): Sam Johnstone, Craig Dawson, Yerson Mosquera (off 82'), André, Rayan Aït-Nouri, Nélson Semedo, Mario Lemina, João Gomes (off 82'), Matheus Cunha, Jean-Ricner Bellegarde (off 71'), Jørgen Strand Larsen (off 65') | Subs: Rodrigo Gomes (on 71'), Gonçalo Guedes (on 65'), Santiago Bueno (on 82'), Tommy Doyle (on 82')
+Aston Villa (4-2-3-1): Emiliano Martínez, Pau Torres, Diego Carlos, Lucas Digne (off 45'), Ezri Konsa, Morgan Rogers, Youri Tielemans, Amadou Onana (off 62'), Ollie Watkins (off 90'+9'), Jacob Ramsey (off 62'), John McGinn (off 45') | Subs: Ross Barkley (on 62'), Jhon Durán (on 62'), Ian Maatsen (on 45'), Leon Bailey (on 45'), Emiliano Buendía (on 90'+9')
+
+2024-03-30 · Aston Villa Home · English Premier League · Corners: Wolverhampton 4, Aston Villa 5 (9) · 0:2
+Wolverhampton (3-4-2-1): José Sá, Max Kilman, Toti Gomes, Santiago Bueno, Tommy Doyle (off 71'), João Gomes (off 84'), Rayan Aït-Nouri (off 64'), Nélson Semedo (off 84'), Leon Chiwome (off 84'), Mario Lemina, Pablo Sarabia | Subs: Tawanda Chirewa (on 71'), Boubacar Traoré (on 84'), Matt Doherty (on 84'), Nathan Fraser (on 84'), Hugo Bueno (on 64')
+Aston Villa (4-4-2): Emiliano Martínez, Pau Torres, Diego Carlos, Álex Moreno (off 63'), Ezri Konsa, Douglas Luiz, Youri Tielemans, Morgan Rogers (off 63'), Leon Bailey (off 90'+7'), Ollie Watkins (off 45'), Moussa Diaby (off 88') | Subs: Tim Iroegbunam (on 88'), Kaine Kesler Hayden (on 90'+7'), Nicolò Zaniolo (on 63'), Jhon Durán (on 45'), Lucas Digne (on 63')
+
+## Match News
+
+Here is the summarized match news and lineup block for the report:
+
+---
+
+**Lineup & absences (Wolverhampton Wanderers)**
+
+- **Formation & Possible XI:** 4-3-3 – Sá; Mosquera, S. Bueno, Toti, H. Bueno; André, Bellegarde, A. Gomes; Armstrong, Arokodare, Mané (per Sports Mole – https://www.sportsmole.co.uk/football/aston-villa/top-four-race/preview/wolves-vs-aston-villa-prediction-team-news-lineups_592682.html)
 - **Absences:**
-  - Charles De Ketelaere (meniscus injury, out since Feb 8, 2026 – expected return late March 2026 – per Transfermarkt – https://www.transfermarkt.us/atalanta-bc/sperrenundverletzungen/verein/800/plus/1; confirmed by FotMob – https://www.fotmob.com/matches/atalanta-vs-dortmund/2rufmy)
-  - Giacomo Raspadori (muscle strain, out since Feb 15, 2026 – expected return early March 2026 – per Transfermarkt – https://www.transfermarkt.us/atalanta-bc/sperrenundverletzungen/verein/800/plus/1; confirmed by FotMob – https://www.fotmob.com/matches/atalanta-vs-dortmund/2rufmy)
-  - Sead Kolasinac (involvement uncertain per bulinews.com – https://bulinews.com/atalanta-bergamo-borussia-dortmund-ucl-preview-team-news-and-predicted-lineups)
+  - Hee-Chan Hwang (calf injury since Feb 8, 2026 – ruled out, expected return ~Mar 3, 2026 – per Premier Injuries – https://www.premierinjuries.com/teams/wolverhampton-wanderers)
+  - Toti Gomes (hamstring injury since Dec 15, 2025 – per Transfermarkt – https://www.transfermarkt.us/wolverhampton-wanderers/sperrenundverletzungen/verein/543/plus/1) — *Note: Toti listed as doubtful by FotMob but as a potential starter by Sports Mole if available*
+  - Angel Gomes (back injury, "back is locked up" — left field vs Arsenal Feb 18 — doubtful – per Fox Sports – https://www.foxsports.com/soccer/premier-league-wolves-vs-aston-villa-feb-27-2026-game-boxscore-626966)
+  - Ladislav Krejčí (suspended — sent off for two yellow cards vs Crystal Palace on Feb 22, 2026 – per Sky Sports – https://www.skysports.com/football/video/19530/13510794/off-l-krejci-61-crystal-palace-0-0-wolves; confirmed by Sports Mole – https://www.sportsmole.co.uk/football/aston-villa/top-four-race/preview/wolves-vs-aston-villa-prediction-team-news-lineups_592682.html)
+- **Suspension risk:** Yerson Mosquera (9 yellow cards in 19 appearances) and André (9 yellow cards in 25 appearances) – per Transfermarkt – https://www.transfermarkt.us/wolverhampton-wanderers/sperrenundverletzungen/verein/543/plus/1
 
 ---
 
-**Lineup & absences (Borussia Dortmund)**
+**Lineup & absences (Aston Villa)**
 
-- **Formation & Possible XI:** 3-5-2 – Kobel; Reggiani, Anton, Bensebaini; Ryerson, Nmecha, Bellingham (J.), Brandt, Svensson; Guirassy, Beier (per SI.com – https://www.si.com/soccer/atalanta-vs-borussia-dortmund-preview-predictions-lineups-2-25-26; corroborated by WhoScored – https://www.whoscored.com/matches/1967251/preview/europe-champions-league-2025-2026-atalanta-borussia-dortmund)
+- **Formation & Possible XI:** 4-3-3 – Martínez; Cash, Konsa, Mings, Maatsen; Onana, Douglas Luiz; Bailey, Rogers, Buendía; Watkins (per Sports Mole – https://www.sportsmole.co.uk/football/aston-villa/top-four-race/preview/wolves-vs-aston-villa-prediction-team-news-lineups_592682.html)
 - **Absences:**
-  - Niklas Süle (thigh injury – expected return early March 2026 – per FotMob – https://www.fotmob.com/matches/atalanta-vs-dortmund/2rufmy; Transfermarkt – https://www.transfermarkt.us/borussia-dortmund/sperrenundverletzungen/verein/16)
-  - Filippo Mané (muscle/thigh injury since Feb 1, 2026 – expected return early March 2026 – per Transfermarkt – https://www.transfermarkt.us/borussia-dortmund/sperrenundverletzungen/verein/16; FotMob – https://www.fotmob.com/matches/atalanta-vs-dortmund/2rufmy)
-  - Emre Can – **included in squad but doubtful to start** (adductor pain since Feb 5, 2026; returned to training Feb 24, confirmed in travelling squad – per Qatar Tribune/DPA – https://www.qatar-tribune.com/article/221240/sports/schlotterbeck-and-can-back-in-dortmund-squad-for-atalanta-trip; Yahoo Sports – https://sports.yahoo.com/articles/schlotterbeck-train-dortmund-ahead-atalanta-142829236.html)
-  - Nico Schlotterbeck – **included in squad but doubtful to start** (muscle problems, missed RB Leipzig draw; returned to training Feb 24, confirmed in travelling squad, manager Kovač confirmed both are "fit to play" – per Qatar Tribune/DPA – https://www.qatar-tribune.com/article/221240/sports/schlotterbeck-and-can-back-in-dortmund-squad-for-atalanta-trip; OneFootball/official BVB – https://onefootball.com/en/news/two-players-return-for-final-session-ahead-of-atalanta-42460891)
+  - Boubacar Kamara (knee injury since Jan 11, 2026 – not expected to play this season, return ~Jun 1, 2026 – per Transfermarkt – https://www.transfermarkt.us/aston-villa/sperrenundverletzungen/verein/405/plus/1; manager quote: "he's not going to play this season" – per Premier Injuries – https://www.premierinjuries.com/teams/aston-villa)
+  - Youri Tielemans (ankle injury since Jan 25, 2026 – expected return ~Apr 17–18, 2026 – per Transfermarkt – https://www.transfermarkt.us/aston-villa/sperrenundverletzungen/verein/405/plus/1)
+  - John McGinn (knee injury since Jan 19, 2026 – "6-8 weeks out" per manager – expected return ~Mar 2–4, 2026 – per Premier Injuries – https://www.premierinjuries.com/teams/aston-villa)
+  - Alysson (knock since Feb 13, 2026 – expected return ~Mar 2–4, 2026 – per Premier Injuries – https://www.premierinjuries.com/teams/aston-villa)
+  - Harvey Elliott (muscle injury since Feb 20, 2026 – expected return ~Mar 12, 2026 – per Transfermarkt – https://www.transfermarkt.us/aston-villa/sperrenundverletzungen/verein/405/plus/1)
+  - Marco Bizot (suspended – red card vs Newcastle in FA Cup on Feb 14, 2026; ban carries over to Premier League – per Yorkshire Evening Post – https://www.yorkshireeveningpost.co.uk/sport/football/leeds-united/leeds-united-aston-villa-ban-confirmed-fa-cup-red-card-5599770) — back-up GK; Emiliano Martínez expected to start
+  - Andrés García (hamstring recurrence in training – scan pending, return unknown – per Sports Mole – https://www.sportsmole.co.uk/football/aston-villa/injury-news/news/aston-villa-dealt-blow-as-squad-member-suffers-injury-recurrence-in-training_592660.html)
 
 ---
 
 **Other news**
 
-- This is the 2nd leg of the UEFA Champions League Knockout Round Play-off; Dortmund hold a 2-0 aggregate lead from the first leg played on Feb 17/18, 2026 (per ESPN – https://www.espn.com/soccer/match/_/gameId/401858762/borussia-dortmund-atalanta)
-- Atalanta have not scored in their last 182 minutes in the Champions League this season (per WhoScored – https://www.whoscored.com/matches/1967251/preview/europe-champions-league-2025-2026-atalanta-borussia-dortmund)
-- Dortmund coach Niko Kovač confirmed at pre-match press conference: "We are delighted that our two captains [Schlotterbeck & Can] are back on board. They are fit to play and will help us" (per Qatar Tribune/DPA – https://www.qatar-tribune.com/article/221240/sports/schlotterbeck-and-can-back-in-dortmund-squad-for-atalanta-trip)
-- The winner advances to the Round of 16 and will face either Arsenal or Bayern Munich (per Qatar Tribune – https://www.qatar-tribune.com/article/221240/sports/schlotterbeck-and-can-back-in-dortmund-squad-for-atalanta-trip)
-- Venue: New Balance Arena, Bergamo, Italy – capacity 24,950, grass surface, forecast 11°C (per FotMob – https://www.fotmob.com/matches/atalanta-vs-dortmund/2rufmy)
-- Referee: José María Sánchez Martínez (ESP); VAR: Guillermo Cuadra Fernández (ESP) (per SI.com – https://www.si.com/soccer/atalanta-vs-borussia-dortmund-preview-predictions-lineups-2-25-26)
-- Atalanta last-used starting XI (vs Napoli, Feb 22, 2026): Carnesecchi; Scalvini, Hien, Kolasinac; Bellanova, De Roon, Pašalić, Zappacosta; Sulemana, Zalewski; Krstovic (per Yahoo Sports – https://sports.yahoo.com/articles/preview-atalanta-vs-borussia-dortmund-175000863.html)
-- Dortmund last-used starting XI (vs RB Leipzig, Feb 21, 2026): Kobel; Reggiani, Anton, Bensebaini; Ryerson, J. Bellingham, Nmecha, Svensson; Sabitzer; Guirassy, Beier (per Yahoo Sports – https://sports.yahoo.com/articles/preview-atalanta-vs-borussia-dortmund-175000863.html)
+- Wolves are bottom of the Premier League (1W–7D–20L, 10 pts after 28 games) and are described as already "mentally preparing for the Championship in 2026-27" (per The Stats Zone – https://www.thestatszone.com/wolves-vs-aston-villa-preview-team-news-prediction-173087)
+- Wolves are on an 8-match winless run in the Premier League; also winless in their last 4 home games (per Betway – https://www.betway.co.za/blog/february-2026/epl-wolverhampton-wanderers-v-aston-villa)
+- Aston Villa are 3rd in the table (15W–6D–6L, 51 pts after 27 games), but have won just one of their last four Premier League games and are 10 points behind leaders Arsenal (per ESPN – https://www.espn.co.uk/football/match/_/gameId/740868/aston-villa-wolverhampton-wanderers)
+- Rob Edwards (Wolves) confirmed Krejčí's red card "cost" the team vs Palace and stated: "He's got to learn." (per The Athletic via NY Times – https://www.nytimes.com/athletic/7063926/2026/02/23/krejci-red-card/)
+- Unai Emery (Villa) said: "We're not feeling favourites... with the new coach, [Wolves] are going to be motivated and excited." (per BBC Sport – https://www.bbc.com/sport/football/articles/c62l7vy1r4vo)
+- Venue: Molineux Stadium, Wolverhampton. Kick-off: 8:00 PM (GMT), Friday 27 February 2026 (per ESPN – https://www.espn.com/soccer/match/_/gameId/740868/aston-villa-wolverhampton-wanderers)
+- Mateus Mané (Wolves) is reported to be attracting interest from "a number of major clubs" amid transfer speculation (per Sports Mole – https://www.sportsmole.co.uk/football/aston-villa/top-four-race/preview/wolves-vs-aston-villa-prediction-team-news-lineups_592682.html)
+
+## Corner Odds
+
+### Alternate Totals Corners
+
+| Line | FanDuel O | FanDuel U | DraftKings O | DraftKings U |
+| ---: | ---: | ---: | ---: | ---: |
+| 4.5 | 1.02 | 10.00 | - | - |
+| 5.5 | 1.05 | 7.70 | - | - |
+| 6.5 | 1.11 | 5.60 | - | - |
+| 7.5 | 1.23 | 3.70 | 1.24 | 3.70 |
+| 8.5 | 1.45 | 2.56 | 1.43 | 2.60 |
+| 9.5 | 1.78 | 1.93 | 1.74 | 2.00 |
+| 10.5 | 2.18 | 1.60 | 2.20 | 1.61 |
+| 11.5 | 2.92 | 1.36 | 2.90 | 1.36 |
+| 12.5 | 4.20 | 1.18 | - | - |
+| 13.5 | 5.70 | 1.11 | - | - |
+| 14.5 | 7.50 | 1.06 | - | - |
+| 15.5 | 9.00 | 1.03 | - | - |
+
+### Alternate Spreads Corners
+
+| Bookmaker | Outcome | Line | Odds |
+|---|---|---:|---:|
+| DraftKings | Aston Villa | -1.5 | 1.83 |
+| DraftKings | Wolverhampton Wanderers | 1.5 | 1.87 |

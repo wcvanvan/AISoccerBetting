@@ -12,6 +12,8 @@ import { H2HAnalyzer } from '../analyzer';
 import { MarkdownFormatter } from '../formatter';
 import { MatchDetails, H2HMatch } from '../types';
 import { CollectorConfig } from '../config';
+import { OddsCollector } from '../odds';
+import { MatchCornerOdds } from '../odds/types';
 
 /**
  * Input parameters for corner data collection
@@ -36,6 +38,7 @@ export class CornerDataCollector {
   private detailExtractor: MatchDetailExtractor;
   private h2hAnalyzer: H2HAnalyzer;
   private markdownFormatter: MarkdownFormatter;
+  private oddsCollector: OddsCollector | null;
   private alerts: string[];
 
   constructor(config?: CollectorConfig) {
@@ -53,6 +56,8 @@ export class CornerDataCollector {
     this.detailExtractor = new MatchDetailExtractor(this.apiClient);
     this.h2hAnalyzer = new H2HAnalyzer(this.apiClient);
     this.markdownFormatter = new MarkdownFormatter();
+    const oddsApiKey = process.env.THE_ODDS_API_KEY?.trim();
+    this.oddsCollector = oddsApiKey ? new OddsCollector(oddsApiKey) : null;
     this.alerts = [];
   }
 
@@ -88,7 +93,8 @@ export class CornerDataCollector {
     const format = (
       teamA_matches: MatchDetails[],
       teamB_matches: MatchDetails[],
-      h2h_matches: H2HMatch[]
+      h2h_matches: H2HMatch[],
+      cornerOdds?: MatchCornerOdds
     ): string =>
       this.markdownFormatter.format_output(
         normalizedInput.teamA_name,
@@ -98,24 +104,33 @@ export class CornerDataCollector {
         teamB_matches,
         h2h_matches,
         this.alerts,
-        normalizedInput.matchNewsSummary
+        normalizedInput.matchNewsSummary,
+        cornerOdds
       );
 
     try {
       const teamA_id = await this.resolveTeamID(normalizedInput.teamA_name, 'Team A');
       const teamB_id = await this.resolveTeamID(normalizedInput.teamB_name, 'Team B');
 
-      const teamA_matches = await this.collectTeamMatches(teamA_id, normalizedInput.teamA_name);
-      const teamB_matches = await this.collectTeamMatches(teamB_id, normalizedInput.teamB_name);
+      const [teamA_matches, teamB_matches, h2h_matches, cornerOdds] = await Promise.all([
+        this.collectTeamMatches(teamA_id, normalizedInput.teamA_name),
+        this.collectTeamMatches(teamB_id, normalizedInput.teamB_name),
+        this.collectH2HMatches(
+          teamA_id,
+          teamB_id,
+          normalizedInput.teamA_name,
+          normalizedInput.teamB_name
+        ),
+        this.oddsCollector
+          ? this.oddsCollector.collectCornerOdds(
+              normalizedInput.teamA_name,
+              normalizedInput.teamB_name,
+              normalizedInput.match_date
+            )
+          : Promise.resolve(undefined),
+      ]);
 
-      const h2h_matches = await this.collectH2HMatches(
-        teamA_id,
-        teamB_id,
-        normalizedInput.teamA_name,
-        normalizedInput.teamB_name
-      );
-
-      return format(teamA_matches, teamB_matches, h2h_matches);
+      return format(teamA_matches, teamB_matches, h2h_matches, cornerOdds);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);
