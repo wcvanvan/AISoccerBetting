@@ -1,6 +1,6 @@
 /**
  * Configure Node's fetch (undici) to use a proxy before calling Anthropic API.
- * Set ANTHROPIC_PROXY or HTTP_PROXY in .env (e.g. http://127.0.0.1:7890).
+ * Set PROXY or HTTP_PROXY in .env (e.g. http://127.0.0.1:7890).
  */
 
 import { setGlobalDispatcher, ProxyAgent } from 'undici';
@@ -9,7 +9,7 @@ let configured = false;
 
 export function configureAnthropicProxy(): void {
   if (configured) return;
-  const url = process.env.ANTHROPIC_PROXY || process.env.HTTP_PROXY;
+  const url = process.env.PROXY || process.env.HTTP_PROXY;
   if (url) {
     setGlobalDispatcher(new ProxyAgent(url));
     configured = true;

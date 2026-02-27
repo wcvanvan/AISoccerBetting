@@ -30,10 +30,10 @@ export class MarkdownFormatter {
     s.push(`Date: ${match_date} | Source: ESPN API\n`);
     s.push('---\n');
 
-    s.push(`## ${teamA_name} — Last 10\n`);
+    s.push(`## ${teamA_name} — Last 20\n`);
     s.push(this.formatTeamMatches(teamA_matches));
 
-    s.push(`## ${teamB_name} — Last 10\n`);
+    s.push(`## ${teamB_name} — Last 20\n`);
     s.push(this.formatTeamMatches(teamB_matches));
 
     if (h2h_matches.length > 0) {

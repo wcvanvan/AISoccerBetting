@@ -5,10 +5,10 @@
  *
  * Requires in .env:
  *   ANTHROPIC_API_KEY    – for Claude
- *   ANTHROPIC_MODEL      – Claude model to use
+ *   WEB_SEARCH_MODEL      – Claude model to use
  *   TAVILY_API_KEY       – for Tavily web search (free tier at app.tavily.com)
  * Optional:
- *   ANTHROPIC_PROXY / HTTP_PROXY – proxy for outbound requests
+ *   PROXY / HTTP_PROXY – proxy for outbound requests
  */
 
 import { createAgent } from 'langchain';
@@ -43,7 +43,7 @@ export async function runMatchNews(
 
   const userMessage = buildUserMessage(teamA, teamB, matchDate);
 
-  const model = process.env.ANTHROPIC_MODEL?.trim();
+  const model = process.env.WEB_SEARCH_MODEL?.trim();
   const llm = new ChatAnthropic({ model, apiKey });
   const tavilyTool = new TavilySearch({ maxResults: 5 });
 

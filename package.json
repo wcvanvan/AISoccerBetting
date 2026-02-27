@@ -12,7 +12,10 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "start": "ts-node src/cli.ts",
-    "test:odds-corners": "ts-node src/scripts/test-odds-corner-markets.ts"
+    "analyze": "ts-node src/cli.ts --analyze",
+    "news": "ts-node src/cli.ts --news",
+    "odds": "ts-node src/cli.ts --odds",
+    "test:connection": "ts-node src/cli.ts --test-connection"
   },
   "keywords": [
     "espn",

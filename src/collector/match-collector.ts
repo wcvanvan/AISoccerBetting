@@ -37,10 +37,10 @@ export class MatchCollector {
    * For Belgian teams, discovers Belgium Cup (Beker van België) from bel.1 match summary form.
    *
    * @param teamId - ESPN Team_ID
-   * @param limit - Number of matches to collect (default 10)
+   * @param limit - Number of matches to collect (default 20)
    * @returns List of MatchReference objects, sorted by date descending
    */
-  async collect_matches(teamId: string, limit: number = 10): Promise<MatchReference[]> {
+  async collect_matches(teamId: string, limit: number = 20): Promise<MatchReference[]> {
     const leagueCodes = this.leagueManager.get_league_codes();
     const allMatches: MatchReference[] = [];
     const seenMatchIds = new Set<string>();

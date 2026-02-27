@@ -155,14 +155,14 @@ export class CornerDataCollector {
   }
 
   /**
-   * Collect last 10 matches for a team
+   * Collect last 20 matches for a team
    */
   private async collectTeamMatches(teamId: string, teamName: string): Promise<MatchDetails[]> {
     try {
       const matchRefs = await this.matchCollector.collect_matches(teamId);
-      
-      if (matchRefs.length < 10) {
-        this.alerts.push(`${teamName}: Only ${matchRefs.length} matches found (expected 10)`);
+
+      if (matchRefs.length < 20) {
+        this.alerts.push(`${teamName}: Only ${matchRefs.length} matches found (expected 20)`);
       }
 
       const matches: MatchDetails[] = [];
