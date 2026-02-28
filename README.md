@@ -41,6 +41,7 @@ npm run analyze wolverhampton-vs-aston-villa-2026-02-27.md
 
 Reads an existing report and runs Claude Opus corner betting analysis. Writes `{slug}-analysis.md`.
 Times out after `ANALYSIS_TIMEOUT` seconds (default 1200).
+Analysis of current config takes about 600s to finish.
 
 Set `ANALYSIS_ENABLED=true` in `.env.defaults` to run Opus analysis automatically after data collection.
 
