@@ -1,18 +1,4 @@
 /**
- * Core data types for ESPN Corner Data Collector
- */
-
-/**
- * Reference to a match with minimal metadata
- */
-export interface MatchReference {
-  match_id: string;
-  league_code: string;
-  date: Date;
-  is_completed: boolean;
-}
-
-/**
  * Substitute player information (player who came on)
  */
 export interface Substitute {
@@ -44,6 +30,8 @@ export interface MatchDetails {
   corners_conceded: number | null;
   total_corners: number | null;
   result: string; // Score as "team:opponent" (e.g. "2:1")
+  /** Additional metrics from enrichment sources (xG, possession, saves, etc.) */
+  extras?: Record<string, string | number | null>;
 }
 
 /**
@@ -65,22 +53,9 @@ export interface H2HMatch {
   teamB_corners: number | null;
   total_corners: number | null;
   result: string; // Score like "2-1"
+  /** Additional metrics for team A (xG, possession, saves, etc.) */
+  teamA_extras?: Record<string, string | number | null>;
+  /** Additional metrics for team B (xG, possession, saves, etc.) */
+  teamB_extras?: Record<string, string | number | null>;
 }
 
-/**
- * Upcoming match lineup information
- */
-export interface UpcomingLineup {
-  formation: string | null;
-  lineup: string[];
-  source: string; // "Confirmed", "Reported (media)", or "Predicted (from last match)"
-  absences: string[]; // Injured/suspended players
-}
-
-/**
- * Upcoming lineup data for both teams
- */
-export interface TeamUpcomingLineup {
-  teamA: UpcomingLineup;
-  teamB: UpcomingLineup;
-}

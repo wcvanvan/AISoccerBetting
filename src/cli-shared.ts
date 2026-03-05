@@ -1,35 +1,42 @@
-#!/usr/bin/env node
-
 /**
- * CLI interface for ESPN Corner Data Collector
+ * Shared CLI logic for both corner and goal pipelines.
+ * Each pipeline is a thin wrapper that calls runPipeline() with its config.
  */
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { config as loadEnv } from 'dotenv';
-
-// Load shared defaults first, then local secrets (local wins on conflicts)
-loadEnv({ path: path.join(process.cwd(), '.env.defaults') });
-loadEnv({ path: path.join(process.cwd(), '.env'), override: true });
 
 import { configureAnthropicProxy } from './agent/configure-proxy';
-import { CornerDataCollector } from './collector';
-import { ConfigLoader } from './config';
+import { MatchDataCollector } from './collector';
 import { runMatchNews, analyzeReport } from './agent';
-import { OddsApiClient, OddsCollector } from './odds';
+import { OddsApiClient, OddsCollector, MarketConfig } from './odds';
+import { FormatOptions } from './formatter';
+import { SoccerdataProvider } from './provider';
 import { ChatAnthropic } from '@langchain/anthropic';
 import { HumanMessage } from '@langchain/core/messages';
 
-configureAnthropicProxy();
+// ── Pipeline configuration ──────────────────────────────────────────────────
 
-// ── Argument parsing ──────────────────────────────────────────────────────────
+export interface PipelineConfig {
+  /** Which odds markets to fetch */
+  marketConfig: MarketConfig;
+  /** System prompt for analysis */
+  analysisPrompt: string;
+  /** Format options controlling report output */
+  formatOptions: Partial<FormatOptions>;
+  /** Tool name for usage text, e.g. "corners" or "goals" */
+  toolName: string;
+  /** Market label for display, e.g. "Corner" or "Goal" */
+  marketLabel: string;
+}
+
+// ── Argument types ──────────────────────────────────────────────────────────
 
 type CollectArgs = {
   mode: 'collect';
   teamA: string;
   teamB: string;
   date: string;
-  configPath?: string;
 };
 
 type AnalyzeArgs = {
@@ -56,39 +63,41 @@ type TestArgs = {
 
 type ParsedArgs = CollectArgs | AnalyzeArgs | NewsArgs | OddsArgs | TestArgs | null;
 
-function parseArgs(): ParsedArgs {
+// ── Argument parsing ────────────────────────────────────────────────────────
+
+function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
   const argv = process.argv.slice(2);
 
-  // --analyze <report.md>  — run analysis only on an existing report
+  // --analyze <report.md>
   const analyzeIdx = argv.indexOf('--analyze');
   if (analyzeIdx !== -1) {
     const reportPath = argv[analyzeIdx + 1];
     if (!reportPath) {
       console.error('Error: --analyze requires a path to a report file');
-      printUsage();
+      printUsage(toolName, marketLabel);
       return null;
     }
     return { mode: 'analyze', reportPath };
   }
 
-  // --news teamA teamB date  — fetch match news only
+  // --news teamA teamB date
   const newsIdx = argv.indexOf('--news');
   if (newsIdx !== -1) {
     const [teamA, teamB, date] = argv.slice(newsIdx + 1, newsIdx + 4);
     if (!teamA || !teamB || !date) {
       console.error('Error: --news requires three arguments: teamA teamB date');
-      printUsage();
+      printUsage(toolName, marketLabel);
       return null;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       console.error('Error: Date must be in ISO format (YYYY-MM-DD)');
-      printUsage();
+      printUsage(toolName, marketLabel);
       return null;
     }
     return { mode: 'news', teamA: teamA.trim(), teamB: teamB.trim(), date: date.trim() };
   }
 
-  // --odds [teamA teamB]  — fetch corner odds or list events
+  // --odds [teamA teamB]
   const oddsIdx = argv.indexOf('--odds');
   if (oddsIdx !== -1) {
     const teamA = argv[oddsIdx + 1]?.trim();
@@ -96,98 +105,66 @@ function parseArgs(): ParsedArgs {
     return { mode: 'odds', teamA: teamA || undefined, teamB: teamB || undefined };
   }
 
-  // --test-connection  — smoke test the Claude analysis model
+  // --test-connection
   if (argv.includes('--test-connection')) {
     return { mode: 'test-connection' };
   }
 
-  // --init-config [path]
-  if (argv[0] === '--init-config') {
-    const configOutputPath = argv[1] || 'espn-collector.config.json';
-    ConfigLoader.createSampleConfig(configOutputPath);
-    return null;
-  }
-
-  // collect mode: teamA teamB date [--config path]
-  let args = [...argv];
-  let configPath: string | undefined;
-  let i = 0;
-  while (i < args.length) {
-    if ((args[i] === '--config' || args[i] === '-c') && args[i + 1]) {
-      configPath = args[i + 1];
-      args.splice(i, 2);
-    } else {
-      i++;
-    }
-  }
-
-  if (args.length < 3) {
+  // collect mode: teamA teamB date
+  if (argv.length < 3) {
     console.error('Error: Three arguments required: teamA, teamB, date');
-    printUsage();
+    printUsage(toolName, marketLabel);
     return null;
   }
 
-  const teamA = args[0]?.trim() ?? '';
-  const teamB = args[1]?.trim() ?? '';
-  const date = args[2]?.trim() ?? '';
+  const teamA = argv[0]?.trim() ?? '';
+  const teamB = argv[1]?.trim() ?? '';
+  const date = argv[2]?.trim() ?? '';
 
   if (!teamA || !teamB) {
     console.error('Error: Team names cannot be empty');
-    printUsage();
+    printUsage(toolName, marketLabel);
     return null;
   }
   if (!date) {
     console.error('Error: Date cannot be empty');
-    printUsage();
+    printUsage(toolName, marketLabel);
     return null;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     console.error('Error: Date must be in ISO format (YYYY-MM-DD)');
-    printUsage();
+    printUsage(toolName, marketLabel);
     return null;
   }
 
-  return { mode: 'collect', teamA, teamB, date, configPath };
+  return { mode: 'collect', teamA, teamB, date };
 }
 
-function printUsage(): void {
+function printUsage(toolName: string, marketLabel: string): void {
   console.log(`
-ESPN Corner Data Collector
-==========================
+Soccer Betting Analyzer — ${marketLabel} Markets
+${'='.repeat(42 + marketLabel.length)}
 
 Usage:
-  npm start <teamA> <teamB> <date> [options]   Collect data → {slug}.md
-  npm run analyze <report.md>                  Analyse existing report → {slug}-analysis.md
-  npm run news <teamA> <teamB> <date>          Fetch match news → {slug}-news.md
-  npm run odds <teamA> <teamB>                 Fetch corner odds for a match
-  npm run odds                                 List upcoming events
-  npm run test:connection                      Smoke test Claude API connection
-  npm start --init-config [<path>]             Create a sample config file
+  npm run ${toolName} "TeamA" "TeamB" "YYYY-MM-DD"       Collect data → {slug}.md
+  npm run ${toolName}:analyze <report.md>                 Analyse existing report → {slug}-analysis.md
+  npm run ${toolName}:news "TeamA" "TeamB" "YYYY-MM-DD"  Fetch match news → {slug}-news.md
+  npm run ${toolName}:odds "TeamA" "TeamB"                Fetch ${marketLabel.toLowerCase()} odds for a match
+  npm run ${toolName}:odds                                List upcoming events
+  npm run test:connection                                 Smoke test Claude API connection
 
 Arguments:
-  teamA  - Name of the first team (e.g., "Manchester United")
-  teamB  - Name of the second team (e.g., "Liverpool")
+  TeamA  - Name of the first team (e.g., "Manchester United")
+  TeamB  - Name of the second team (e.g., "Liverpool")
   date   - Match date in ISO format (e.g., "2026-03-15")
 
-Options:
-  --config, -c <path>  Path to configuration file
-
-Examples:
-  npm start "Wolverhampton" "Aston Villa" "2026-02-27"
-  npm run analyze wolverhampton-vs-aston-villa-2026-02-27.md
-  npm run news "Wolverhampton" "Aston Villa" "2026-02-27"
-  npm run odds "Wolverhampton" "Aston Villa"
-
-Environment (see .env.defaults for all):
-  MATCH_NEWS_FETCHING=true  Fetch live match news via Claude + Tavily
-  ANALYSIS_ENABLED=true     Auto-run analysis after data collection
-  ANALYSIS_MODEL            Claude model for analysis (default: claude-opus-4-6)
-  ANALYSIS_TIMEOUT          Timeout in seconds
-  THE_ODDS_API_KEY          Required for odds lookup
+Prerequisites:
+  pip install -r scripts/requirements.txt
+  API keys configured in .env (see .env.defaults for options)
   `);
 }
 
-// ── Filename helpers ──────────────────────────────────────────────────────────
+// ── Filename helpers ────────────────────────────────────────────────────────
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
@@ -205,20 +182,30 @@ function buildNewsFilename(teamA: string, teamB: string, date: string): string {
   return `${slug(teamA)}-vs-${slug(teamB)}-${date}-news.md`;
 }
 
-// ── Analysis runner ───────────────────────────────────────────────────────────
+// ── Analysis runner ─────────────────────────────────────────────────────────
 
-async function runAnalysis(reportMarkdown: string, analysisFilename: string): Promise<void> {
-  console.log('Running corner betting analysis with Opus...');
-  const analysis = await analyzeReport(reportMarkdown);
+async function runAnalysis(
+  reportMarkdown: string,
+  analysisFilename: string,
+  systemPrompt: string,
+  marketLabel: string,
+): Promise<void> {
+  console.log(`Running ${marketLabel.toLowerCase()} betting analysis with Opus...`);
+  const analysis = await analyzeReport(reportMarkdown, systemPrompt);
   fs.writeFileSync(analysisFilename, analysis, 'utf8');
   console.log(`Analysis saved → ${analysisFilename}`);
 }
 
-// ── Odds helpers ─────────────────────────────────────────────────────────────
+// ── Odds helpers ────────────────────────────────────────────────────────────
 
-async function showCornerOdds(apiKey: string, teamA: string, teamB: string): Promise<void> {
-  const collector = new OddsCollector(apiKey);
-  const result = await collector.collectCornerOdds(teamA, teamB);
+async function showOdds(
+  apiKey: string,
+  teamA: string,
+  teamB: string,
+  marketConfig: MarketConfig,
+): Promise<void> {
+  const collector = new OddsCollector(apiKey, marketConfig);
+  const result = await collector.collectOdds(teamA, teamB);
 
   if (!result.found) {
     console.log(`No event found for "${teamA}" vs "${teamB}".`);
@@ -229,7 +216,7 @@ async function showCornerOdds(apiKey: string, teamA: string, teamB: string): Pro
   console.log(`\n${result.homeTeam} vs ${result.awayTeam}\n`);
 
   if (result.markets.length === 0) {
-    console.log('No corner markets available yet.');
+    console.log(`No ${marketConfig.label.toLowerCase()} markets available yet.`);
     return;
   }
 
@@ -269,10 +256,50 @@ async function listOddsEvents(apiKey: string): Promise<void> {
   }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Test connection ─────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const args = parseArgs();
+async function testConnection(): Promise<void> {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
+    console.error('Error: ANTHROPIC_API_KEY is not set in .env');
+    process.exit(1);
+  }
+  const model = process.env.ANALYSIS_MODEL?.trim() || 'claude-opus-4-6';
+  console.log(`Testing connection to ${model}...`);
+  const start = Date.now();
+  try {
+    const llm = new ChatAnthropic({ model, apiKey });
+    const result = await llm.invoke([new HumanMessage('Reply with "ok".')]);
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    const content =
+      typeof result.content === 'string'
+        ? result.content.trim()
+        : JSON.stringify(result.content);
+    console.log(`OK — ${model} responded in ${elapsed}s`);
+    console.log(`Response: "${content}"`);
+    process.exit(0);
+  } catch (err) {
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FAILED after ${elapsed}s: ${msg}`);
+    process.exit(1);
+  }
+}
+
+// ── Main pipeline ───────────────────────────────────────────────────────────
+
+export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void> {
+  configureAnthropicProxy();
+
+  const {
+    marketConfig,
+    analysisPrompt,
+    formatOptions,
+    toolName,
+    marketLabel,
+  } = pipelineConfig;
+
+  const args = parseArgs(toolName, marketLabel);
   if (!args) {
     process.exit(1);
   }
@@ -287,7 +314,7 @@ async function main(): Promise<void> {
     const reportMarkdown = fs.readFileSync(reportPath, 'utf8');
     const analysisFilename = buildAnalysisFilename(reportPath);
     try {
-      await runAnalysis(reportMarkdown, analysisFilename);
+      await runAnalysis(reportMarkdown, analysisFilename, analysisPrompt, marketLabel);
       process.exit(0);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -321,7 +348,7 @@ async function main(): Promise<void> {
     }
     try {
       if (args.teamA && args.teamB) {
-        await showCornerOdds(apiKey, args.teamA, args.teamB);
+        await showOdds(apiKey, args.teamA, args.teamB, marketConfig);
       } else {
         await listOddsEvents(apiKey);
       }
@@ -335,38 +362,14 @@ async function main(): Promise<void> {
 
   // ── Connection smoke test ──
   if (args.mode === 'test-connection') {
-    const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-    if (!apiKey) {
-      console.error('Error: ANTHROPIC_API_KEY is not set in .env');
-      process.exit(1);
-    }
-    const model = process.env.ANALYSIS_MODEL?.trim() || 'claude-opus-4-6';
-    console.log(`Testing connection to ${model}...`);
-    const start = Date.now();
-    try {
-      const llm = new ChatAnthropic({ model, apiKey });
-      const result = await llm.invoke([new HumanMessage('Reply with "ok".')]);
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-      const content =
-        typeof result.content === 'string'
-          ? result.content.trim()
-          : JSON.stringify(result.content);
-      console.log(`OK — ${model} responded in ${elapsed}s`);
-      console.log(`Response: "${content}"`);
-      process.exit(0);
-    } catch (err) {
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`FAILED after ${elapsed}s: ${msg}`);
-      process.exit(1);
-    }
+    await testConnection();
+    return;
   }
 
   // ── Full collection mode ──
+  const provider = new SoccerdataProvider();
   try {
-    const configLoader = new ConfigLoader(args.configPath);
-    const config = configLoader.getConfig();
-    const collector = new CornerDataCollector(config);
+    const collector = new MatchDataCollector(provider, marketConfig, formatOptions);
 
     let matchNewsSummary: string | undefined;
     const useMatchNews =
@@ -396,16 +399,18 @@ async function main(): Promise<void> {
     if (useAnalysis) {
       try {
         const analysisFilename = buildAnalysisFilename(reportFilename);
-        await runAnalysis(markdown, analysisFilename);
+        await runAnalysis(markdown, analysisFilename, analysisPrompt, marketLabel);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`Analysis skipped: ${msg}`);
       }
     }
 
+    provider.dispose();
     process.exit(0);
   } catch (error) {
-    console.error('\n❌ ERROR: Failed to collect data\n');
+    provider.dispose();
+    console.error('\nERROR: Failed to collect data\n');
 
     if (error instanceof Error) {
       console.error(`Message: ${error.message}\n`);
@@ -420,11 +425,9 @@ async function main(): Promise<void> {
     console.error('Please check:');
     console.error('  - Team names are spelled correctly');
     console.error('  - Date is in ISO format (YYYY-MM-DD)');
-    console.error('  - You have an active internet connection');
-    console.error('  - ESPN API is accessible\n');
+    console.error('  - Python 3 + soccerdata are installed (pip install -r scripts/requirements.txt)');
+    console.error('  - You have an active internet connection\n');
 
     process.exit(1);
   }
 }
-
-main();

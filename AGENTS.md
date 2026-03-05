@@ -6,9 +6,9 @@ TypeScript CLI for soccer corner-kick betting analysis. Three data pipelines run
 
 **Data collection** (parallel):
 
-1. **ESPN data** — last 20 matches per team, H2H history, corners, lineups, formations.
+1. **soccerdata bridge** — Python subprocess merging ESPN (schedule, lineups, corners) and Understat (xG) via the `soccerdata` library.
 2. **Match news agent** — LangChain (Claude Sonnet + Tavily) fetches absences, injuries, and tactical news from the web.
-3. **Corner odds** — The Odds API fetches pre-match corner markets from configured bookmakers.
+3. **Odds** — The Odds API fetches pre-match markets from configured bookmakers.
 
 **Analysis** — Claude Opus reads the collected report (and optionally searches the web via Tavily) to perform statistical analysis, model corner totals and compare predictions against sportsbook lines to find value picks.
 
@@ -17,100 +17,104 @@ Output: data report (`{slug}.md`), analysis (`{slug}-analysis.md`), or standalon
 ## Commands
 
 ```bash
-npm run build                              # compile TypeScript → dist/
-npm test                                   # run Jest test suite (76 tests)
-npm start "TeamA" "TeamB" "YYYY-MM-DD"     # collect data → {slug}.md
-npm run analyze <report.md>                # analyse existing report → {slug}-analysis.md
-npm run news "TeamA" "TeamB" "YYYY-MM-DD"  # fetch match news only → {slug}-news.md
-npm run odds "TeamA" "TeamB"               # corner odds for a match
-npm run odds                               # list upcoming events
-npm run test:connection                    # smoke test Claude API connection
-npm test                                   # all tests
+npm run build                                             # compile TypeScript → dist/
+npm run corners "TeamA" "TeamB" "YYYY-MM-DD"              # collect data → {slug}.md
+npm run corners:analyze <report.md>                       # analyse existing report
+npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"         # fetch match news only
+npm run corners:odds "TeamA" "TeamB"                      # corner odds for a match
+npm run corners:odds                                      # list upcoming events
+npm run test:connection                                   # smoke test Claude API
 ```
-
-## Environment
-
-Non-secret defaults in `.env.defaults` (committed). Secrets in `.env` (git-ignored).
-
-New teammate setup: `cp .env.example .env`, fill in API keys.
 
 ## Architecture
 
 ```
-CLI (src/cli.ts)
- ├─ --analyze mode: read existing report → analyzeReport → {slug}-analysis.md
- ├─ --news mode:    runMatchNews only    → {slug}-news.md
- ├─ --odds mode:    corner odds lookup   → console output
+CLI (src/cli-corners.ts)
  │
- ├─ runMatchNews (src/agent/)
- │    └─ LangChain agent: Claude Sonnet + Tavily → absences, injuries, tactical news
- │
- ├─ CornerDataCollector (src/collector/corner-data-collector.ts)
- │    ├─ TeamIDResolver      (src/resolver/)     — fuzzy team name → ESPN ID
- │    ├─ MatchCollector      (src/collector/)     — last 20 matches per team
- │    ├─ MatchDetailExtractor(src/extractor/)     — corners, lineups, subs from ESPN
- │    ├─ H2HAnalyzer         (src/analyzer/)      — H2H last 2 seasons
- │    ├─ OddsCollector       (src/odds/)          — corner odds from The Odds API
- │    └─ MarkdownFormatter   (src/formatter/)     — report.md (agent-optimised)
- │
- └─ analyzeReport (src/agent/) [if ANALYSIS_ENABLED=true]
-      └─ Claude Opus + optional Tavily → {slug}-analysis.md (human-readable)
+ └─ runPipeline (src/cli-shared.ts)
+     │
+     ├─ runMatchNews (src/agent/)
+     │    └─ LangChain agent: Claude Sonnet + Tavily → absences, injuries, news
+     │
+     ├─ MatchDataCollector (src/collector/match-data-collector.ts)
+     │    ├─ DataProvider interface (src/provider/data-provider.ts)
+     │    │    └─ SoccerdataProvider (src/provider/soccerdata-provider.ts)
+     │    │         └─ stdin/stdout ─→ soccerdata_bridge.py
+     │    │              ├── sd.ESPN
+     │    │              └──  sd.Understat
+     │    │
+     │    ├─ OddsCollector (src/odds/) → corner odds from The Odds API
+     │    └─ MarkdownFormatter (src/formatter/) → report.md
+     │
+     └─ analyzeReport (src/agent/) [if ANALYSIS_ENABLED=true]
+          └─ Claude Opus + optional Tavily → {slug}-analysis.md
 ```
 
-ESPN data, match news, and odds all run in `Promise.all` — no serial bottleneck.
+Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
+
+### Provider layer (src/provider/)
+
+- `DataProvider` — interface: `resolveTeamId()`, `getRecentMatches()`, `getH2HMatches()`, `dispose()`.
+- `SoccerdataProvider` — spawns `python3 scripts/soccerdata_bridge.py`, communicates via JSON lines over stdin/stdout, 120s timeout per call, stderr routed to console for debugging.
+
+### Python bridge (scripts/soccerdata_bridge.py)
+
+- JSON-line protocol over stdin/stdout. `DataAssembler` merges ESPN + Understat via the `soccerdata` library.
+- **Schedule**: `sd.ESPN.read_schedule(force_cache=True)`. Scores not included by soccerdata — `_add_scores()` parses them from cached `Schedule_*.json` files.
+- **Corners / lineup / formation**: fetched from per-game Summary JSONs via `_fetch_summaries()` using soccerdata's HTTP + file-cache layer. Avoids `read_matchsheet()` / `read_lineup()` which are unusably slow (they re-call `read_schedule()` without cache).
+- **xG enrichment**: `sd.Understat.read_team_match_stats()`, merged by (date, team). Non-fatal on failure.
+- **Caching**: soccerdata caches HTTP responses in `~/.soccerdata/`. Set `SOCCERDATA_NO_CACHE=1` to force fresh fetches.
+- **Quirks**: `resolve_team_id()` is a passthrough (no lookup). ESPN Summary JSON uses `subbedIn`/`subbedOut` as booleans; sub times come from `plays[0].clock.displayValue`.
 
 ### Odds module (src/odds/)
 
-- `OddsApiClient` — HTTP wrapper for The Odds API v4 (`getEvents`, `getEventOdds`)
-- `OddsCollector` — finds event by fuzzy team name, fetches corner markets directly using known market keys (`alternate_totals_corners`, `alternate_spreads_corners`). No market discovery call needed — saves API credits.
-- Market keys and bookmaker list are configured via env vars.
+- `OddsApiClient` — HTTP wrapper for The Odds API v4 (`getEvents`, `getEventOdds`).
+- `OddsCollector` — finds event by fuzzy team name, fetches markets using configured `MarketConfig` keys. Parameterised to support different markets (corners, goals, etc.).
+- `MarketConfig` — interface defining market keys and label. `CORNER_MARKET_CONFIG` and `GOAL_MARKET_CONFIG` constants provided.
 
 ### Analysis agent (src/agent/)
 
-- `report-analyzer.ts` — LangChain agent using `ANALYSIS_MODEL` (Opus) with extended thinking. If `TAVILY_API_KEY` is set, the agent can search the web for supplementary data when the report is insufficient; otherwise falls back to single-shot.
-- `prompts/report-analysis-system-prompt.ts` — instructs Opus to: perform venue-filtered statistical analysis (home games for home team, away games for away team), player/sub correlation, formation analysis, outlier handling, absence impact assessment, then compare predictions against sportsbook lines using Negative Binomial distribution + empirical frequencies.
-- Output format: human-friendly markdown with tables, bold, headings. Written to `{slug}-analysis.md`.
-- Two ways to trigger: `ANALYSIS_ENABLED=true` in `.env.defaults` (runs after collection), or `npm run analyze <report.md>` (standalone, skips data collection).
-- Token budget: `ANALYSIS_MAX_TOKENS` (total incl. thinking, default 32768), `ANALYSIS_THINKING_BUDGET` (internal reasoning, default 10000, 0 to disable). Visible output gets the remainder (max_tokens − thinking_budget).
-- Timeout: controlled by `ANALYSIS_TIMEOUT`. Progress is logged to stderr every 60s. If the timeout is exceeded, the process exits with an error suggesting the user increase the limit or check the network.
+- `report-analyzer.ts` — LangChain agent using `ANALYSIS_MODEL` (Opus) with extended thinking. Accepts an optional system prompt parameter for market-specific analysis. If `TAVILY_API_KEY` is set, the agent can search the web for supplementary data; otherwise falls back to single-shot.
+- `prompts/report-analysis-system-prompt.ts` — instructs Opus to: perform venue-filtered statistical analysis, player/sub correlation, formation analysis, outlier handling, absence impact assessment, then compare predictions against sportsbook lines using Negative Binomial distribution + empirical frequencies.
+- Token budget: `ANALYSIS_MAX_TOKENS` (total incl. thinking, default 32768), `ANALYSIS_THINKING_BUDGET` (internal reasoning, default 10000, 0 to disable).
+- Timeout: controlled by `ANALYSIS_TIMEOUT`. Progress is logged to stderr every 60s.
 
 ### Match news agent (src/agent/)
 
 - `match-news-client.ts` — creates a LangChain agent (Claude + Tavily tool), invokes with system prompt, returns text block.
 - `prompts/match-news-system-prompt.ts` — instructions for the agent. Collects confirmed absences and tactical news only. Every fact must include a source URL.
-- Failure is non-fatal in collect mode: logged to stderr, report continues without news section.
-- Standalone mode: `npm run news "TeamA" "TeamB" "YYYY-MM-DD"` → writes `{slug}-news.md`.
+- Failure is non-fatal: logged to stderr, report continues without news section.
 
 ## Output files
 
 | File | Format | Purpose |
 |---|---|---|
-| `{slug}.md` | Compact, no markup | Data report — for downstream agents and as input to analysis |
-| `{slug}-analysis.md` | Human-readable markdown | Opus corner betting analysis — value picks, stats, caveats |
+| `{slug}.md` | Compact, structured | Data report — for downstream agents and as input to analysis |
+| `{slug}-analysis.md` | Human-readable markdown | Opus betting analysis — value picks, stats, caveats |
 | `{slug}-news.md` | Plain text with source URLs | Match news only (absences, injuries, tactical notes) |
 
 ## Project structure
 
 ```
 src/
-├── cli.ts                  # CLI entry point
+├── cli-corners.ts          # CLI entry point (corner markets)
+├── cli-shared.ts           # shared pipeline logic
 ├── index.ts                # library exports
 ├── agent/                  # analyzer + match news (LangChain + Claude + Tavily)
-├── analyzer/               # H2H analysis
-├── api/                    # ESPN API client (retry, rate limit)
-├── collector/              # orchestrator + match collector
-├── config/                 # config file loader
-├── extractor/              # match detail extraction from ESPN
+│   └── prompts/            # system prompts for analysis and news
+├── collector/              # MatchDataCollector orchestrator
 ├── formatter/              # Markdown report generator
-├── league/                 # league code management
-├── odds/                   # The Odds API client + corner odds collector
-├── resolver/               # team name → ESPN ID resolver
-└── types/                  # shared TypeScript interfaces
+├── odds/                   # The Odds API client + market config
+├── provider/               # DataProvider interface + SoccerdataProvider
+└── types/                  # shared TypeScript interfaces (MatchDetails, H2HMatch, etc.)
+
+scripts/
+├── requirements.txt        # Python dependencies (soccerdata, pandas)
+└── soccerdata_bridge.py    # Python bridge — multi-source data assembly
 ```
 
 ## Known limitations
 
-- **FA Cup / domestic cup corner data**: ESPN's API does not provide boxscore statistics (including corners) for early-round cup matches involving lower-league opponents (e.g. Wolves vs Grimsby, Spurs vs Villa in FA Cup 3rd round). Later rounds between top-flight teams do have stats. These games show as `Corners: -w--c (-)` in the report and are excluded from the analysis model's calculations.
+- **Enrichment source availability**: Understat may rate-limit or block scraping. Enrichment failures are non-fatal — the report still generates with base ESPN data.
+- **Team name matching**: soccerdata standardises team names across sources, but edge cases (e.g. accent differences, name changes) may cause enrichment misses for some teams.
 - **Match news excludes predicted lineups**: Predicted XIs from media sources are unreliable and can mislead the analysis. The match news agent collects only confirmed absences, injuries, suspensions, and tactical news.
-
-

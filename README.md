@@ -4,82 +4,62 @@
 
 ```bash
 npm install
-cp .env.example .env   # fill in your API keys (see .env.example)
-npm run build
+pip install -r scripts/requirements.txt   # Python 3 + soccerdata + pandas
+cp .env.example .env                      # fill in your API keys
 ```
 
 Required keys in `.env`:
 - `ANTHROPIC_API_KEY` — [console.anthropic.com](https://console.anthropic.com)
 - `TAVILY_API_KEY` — free tier at [app.tavily.com](https://app.tavily.com)
-- `THE_ODDS_API_KEY` — [the-odds-api.com](https://the-odds-api.com) (corner odds markets)
-
+- `THE_ODDS_API_KEY` — [the-odds-api.com](https://the-odds-api.com) (optional, for odds markets)
 
 ## CLI Commands
 
 ### Collect data + generate report
 
 ```bash
-npm start "TeamA" "TeamB" "YYYY-MM-DD"
+npm run corners "TeamA" "TeamB" "YYYY-MM-DD"
 
 # Examples
-npm start "Wolverhampton" "Aston Villa" "2026-02-27"
-npm start "Atlético Madrid" "Club Brugge" "2026-02-26"
+npm run corners "Wolverhampton" "Aston Villa" "2026-02-27"
+npm run corners "Arsenal" "Chelsea" "2026-03-02"
 ```
 
-Runs ESPN data collection, match news, and odds in parallel. Writes `{team-a}-vs-{team-b}-{date}.md`.
-
----
+Runs soccerdata collection, match news, and odds in parallel. Writes `{team-a}-vs-{team-b}-{date}.md`.
 
 ### Analyse an existing report
 
 ```bash
-npm run analyze <report.md>
+npm run corners:analyze <report.md>
 
 # Example
-npm run analyze wolverhampton-vs-aston-villa-2026-02-27.md
+npm run corners:analyze wolverhampton-vs-aston-villa-2026-02-27.md
 ```
 
 Reads an existing report and runs Claude Opus corner betting analysis. Writes `{slug}-analysis.md`.
-Times out after `ANALYSIS_TIMEOUT` seconds (default 1200).
-Analysis of current config takes about 600s to finish.
 
-Set `ANALYSIS_ENABLED=true` in `.env.defaults` to run Opus analysis automatically after data collection.
-
----
+Set `ANALYSIS_ENABLED=true` in `.env.defaults` to run analysis automatically after data collection.
 
 ### Fetch match news only
 
 ```bash
-npm run news "TeamA" "TeamB" "YYYY-MM-DD"
-
-# Example
-npm run news "Wolverhampton" "Aston Villa" "2026-02-27"
+npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
 ```
 
-Runs the LangChain + Tavily match news agent (confirmed absences, injuries, tactical news) without collecting ESPN data. Writes `{slug}-news.md`.
-
----
+Runs the LangChain + Tavily match news agent (confirmed absences, injuries, tactical news). Writes `{slug}-news.md`.
 
 ### Fetch corner odds
 
 ```bash
 # Look up corner odds for a specific match
-npm run odds "TeamA" "TeamB"
+npm run corners:odds "TeamA" "TeamB"
 
 # List all upcoming events from configured sport keys
-npm run odds
-
-# Examples
-npm run odds "Wolverhampton" "Aston Villa"
-npm run odds "Manchester City" "Arsenal"
+npm run corners:odds
 ```
 
 Fetches `alternate_totals_corners` and `alternate_spreads_corners` markets from The Odds API.
-Requires `THE_ODDS_API_KEY`. 
-Configure bookmakers via `ODDS_BOOKMAKERS` in `.env.defaults`.
-Configure leagues via `ODDS_SPORT_KEYS` in `.env.defaults`.
-
----
+Configure bookmakers via `ODDS_BOOKMAKERS` and leagues via `ODDS_SPORT_KEYS` in `.env.defaults`.
 
 ### Test Claude API connection
 
@@ -87,22 +67,8 @@ Configure leagues via `ODDS_SPORT_KEYS` in `.env.defaults`.
 npm run test:connection
 ```
 
-Quick smoke test that sends a single message to the configured `ANALYSIS_MODEL` and confirms it responds. Useful after setup or when debugging proxy/key issues.
-
----
-
-### Generate a sample config file
-
-```bash
-npm start --init-config [path]
-
-# Example
-npm start --init-config my-config.json
-```
-
 ## Environment
 
 Non-secret defaults live in `.env.defaults` (committed). Secrets go in `.env` (git-ignored).
 
-
-See [AGENTS.md](AGENTS.md) for the full variable list, architecture, and module docs.
+See [AGENTS.md](AGENTS.md) for architecture details.

@@ -1,27 +1,25 @@
 {
-  "name": "espn-corner-data-collector",
-  "version": "1.0.0",
-  "description": "API-based system for collecting soccer corner kick data from ESPN",
+  "name": "soccer-betting-analyzer",
+  "version": "2.0.0",
+  "description": "Multi-source soccer data collection and betting analysis (soccerdata + Claude)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "espn-corner-collector": "dist/cli.js"
-  },
   "scripts": {
     "build": "tsc",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "start": "ts-node src/cli.ts",
-    "analyze": "ts-node src/cli.ts --analyze",
-    "news": "ts-node src/cli.ts --news",
-    "odds": "ts-node src/cli.ts --odds",
-    "test:connection": "ts-node src/cli.ts --test-connection"
+    "start": "ts-node src/cli-corners.ts",
+    "corners": "ts-node src/cli-corners.ts",
+    "corners:analyze": "ts-node src/cli-corners.ts --analyze",
+    "corners:news": "ts-node src/cli-corners.ts --news",
+    "corners:odds": "ts-node src/cli-corners.ts --odds",
+    "test:connection": "ts-node src/cli-corners.ts --test-connection"
   },
   "keywords": [
-    "espn",
     "soccer",
+    "betting",
+    "soccerdata",
     "corners",
-    "data-collector"
+    "goals",
+    "xG"
   ],
   "author": "",
   "license": "MIT",
@@ -29,11 +27,7 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.0",
     "@types/node": "^20.19.33",
-    "fast-check": "^3.15.0",
-    "jest": "^29.5.0",
-    "ts-jest": "^29.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },

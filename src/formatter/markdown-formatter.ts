@@ -10,7 +10,19 @@ import {
   Substitute,
   SubbedOffPlayer,
 } from '../types';
-import { MatchCornerOdds } from '../odds/types';
+import { MatchOdds } from '../odds/types';
+
+export interface FormatOptions {
+  /** Show corner data in match lines (default: true) */
+  showCorners: boolean;
+  /** Label for odds section, e.g. "Corner" or "Goal" (default: "Corner") */
+  oddsLabel: string;
+}
+
+const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
+  showCorners: true,
+  oddsLabel: 'Corner',
+};
 
 export class MarkdownFormatter {
   format_output(
@@ -22,8 +34,10 @@ export class MarkdownFormatter {
     h2h_matches: H2HMatch[],
     alerts: string[],
     matchNewsSummary?: string,
-    cornerOdds?: MatchCornerOdds
+    odds?: MatchOdds,
+    formatOptions?: Partial<FormatOptions>
   ): string {
+    const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
     const s: string[] = [];
 
     s.push(`# ${teamA_name} vs ${teamB_name}\n`);
@@ -31,14 +45,14 @@ export class MarkdownFormatter {
     s.push('---\n');
 
     s.push(`## ${teamA_name} — Last 20\n`);
-    s.push(this.formatTeamMatches(teamA_matches));
+    s.push(this.formatTeamMatches(teamA_matches, opts));
 
     s.push(`## ${teamB_name} — Last 20\n`);
-    s.push(this.formatTeamMatches(teamB_matches));
+    s.push(this.formatTeamMatches(teamB_matches, opts));
 
     if (h2h_matches.length > 0) {
       s.push(`## H2H (Last 2 Seasons)\n`);
-      s.push(this.formatH2H(h2h_matches, teamA_name, teamB_name));
+      s.push(this.formatH2H(h2h_matches, teamA_name, teamB_name, opts));
     }
 
     if (matchNewsSummary?.trim()) {
@@ -47,8 +61,8 @@ export class MarkdownFormatter {
       s.push('');
     }
 
-    if (cornerOdds) {
-      s.push(this.formatCornerOdds(cornerOdds));
+    if (odds) {
+      s.push(this.formatOdds(odds, opts));
     }
 
     if (alerts.length > 0) {
@@ -62,15 +76,28 @@ export class MarkdownFormatter {
 
   // ── Team matches ──────────────────────────────────────────────────────────
 
-  private formatTeamMatches(matches: MatchDetails[]): string {
+  private formatTeamMatches(matches: MatchDetails[], opts: FormatOptions): string {
     if (matches.length === 0) return 'No matches available.\n';
 
     return matches.map((m, i) => {
       const venue = m.venue === 'H' ? 'Home' : m.venue === 'A' ? 'Away' : m.venue;
-      const cW = m.corners_won ?? '-';
-      const cC = m.corners_conceded ?? '-';
-      const cT = m.total_corners ?? '-';
-      const line1 = `${i + 1}. ${m.date} vs ${m.opponent} · ${m.competition} · ${venue} · ${m.formation ?? '-'} · Corners: ${cW}w-${cC}c (${cT}) · ${m.result}`;
+      let line1 = `${i + 1}. ${m.date} vs ${m.opponent} · ${m.competition} · ${venue} · ${m.formation ?? '-'}`;
+
+      if (opts.showCorners) {
+        const cW = m.corners_won ?? '-';
+        const cC = m.corners_conceded ?? '-';
+        const cT = m.total_corners ?? '-';
+        line1 += ` · Corners: ${cW}w-${cC}c (${cT})`;
+      }
+
+      line1 += ` · ${m.result}`;
+
+      // Render extras if present
+      if (m.extras && Object.keys(m.extras).length > 0) {
+        const extrasStr = this.formatExtras(m.extras);
+        line1 += ` · ${extrasStr}`;
+      }
+
       const lineup = this.formatLineup(m.starting_lineup, m.starters_subbed_off, m.substitutes);
       return `${line1}\n   XI: ${lineup}`;
     }).join('\n') + '\n';
@@ -103,22 +130,65 @@ export class MarkdownFormatter {
 
   // ── H2H ───────────────────────────────────────────────────────────────────
 
-  private formatH2H(matches: H2HMatch[], teamA: string, teamB: string): string {
+  private formatH2H(matches: H2HMatch[], teamA: string, teamB: string, opts: FormatOptions): string {
     return matches.map(m => {
-      const cA = m.teamA_corners ?? '-';
-      const cB = m.teamB_corners ?? '-';
-      const cT = m.total_corners ?? '-';
-      const header = `${m.date} · ${m.venue} · ${m.competition} · Corners: ${teamA} ${cA}, ${teamB} ${cB} (${cT}) · ${m.result}`;
+      let header = `${m.date} · ${m.venue} · ${m.competition}`;
+
+      if (opts.showCorners) {
+        const cA = m.teamA_corners ?? '-';
+        const cB = m.teamB_corners ?? '-';
+        const cT = m.total_corners ?? '-';
+        header += ` · Corners: ${teamA} ${cA}, ${teamB} ${cB} (${cT})`;
+      }
+
+      header += ` · ${m.result}`;
+
+      // Render extras if present
+      if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
+        header += ` · ${teamA}: ${this.formatExtras(m.teamA_extras)}`;
+      }
+      if (m.teamB_extras && Object.keys(m.teamB_extras).length > 0) {
+        header += ` · ${teamB}: ${this.formatExtras(m.teamB_extras)}`;
+      }
+
       const lineA = `${teamA} (${m.teamA_formation ?? '-'}): ${this.formatLineup(m.teamA_lineup, m.teamA_starters_subbed_off, m.teamA_substitutes)}`;
       const lineB = `${teamB} (${m.teamB_formation ?? '-'}): ${this.formatLineup(m.teamB_lineup, m.teamB_starters_subbed_off, m.teamB_substitutes)}`;
       return `${header}\n${lineA}\n${lineB}`;
     }).join('\n\n') + '\n';
   }
 
-  // ── Corner Odds ───────────────────────────────────────────────────────────
+  // ── Extras ─────────────────────────────────────────────────────────────────
 
-  private formatCornerOdds(odds: MatchCornerOdds): string {
-    const lines: string[] = ['## Corner Odds\n'];
+  /** Known extras keys and their display labels */
+  private static readonly EXTRAS_LABELS: Record<string, string> = {
+    xG: 'xG',
+    xGA: 'xGA',
+    possession: 'Poss',
+    saves: 'Saves',
+    shots: 'Shots',
+    shots_on_target: 'SoT',
+    pass_completion_pct: 'Pass%',
+  };
+
+  private formatExtras(extras: Record<string, string | number | null>): string {
+    return Object.entries(extras)
+      .filter(([, v]) => v != null)
+      .map(([key, val]) => {
+        const label = MarkdownFormatter.EXTRAS_LABELS[key] ?? this.readableKey(key);
+        return `${label}: ${val}`;
+      })
+      .join(', ');
+  }
+
+  private readableKey(key: string): string {
+    return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  // ── Odds ───────────────────────────────────────────────────────────────────
+
+  private formatOdds(odds: MatchOdds, opts: FormatOptions): string {
+    const label = opts.oddsLabel;
+    const lines: string[] = [`## ${label} Odds\n`];
 
     if (!odds.found) {
       lines.push('Event not found — odds unavailable.\n');
@@ -126,7 +196,7 @@ export class MarkdownFormatter {
     }
 
     if (odds.markets.length === 0) {
-      lines.push('No corner markets open yet.\n');
+      lines.push(`No ${label.toLowerCase()} markets open yet.\n`);
       return lines.join('\n');
     }
 
@@ -149,7 +219,7 @@ export class MarkdownFormatter {
   }
 
   private pivotOverUnder(
-    bookmakers: MatchCornerOdds['markets'][number]['bookmakers']
+    bookmakers: MatchOdds['markets'][number]['bookmakers']
   ): string[] {
     const lineSet = new Set<number>();
     for (const bm of bookmakers)
@@ -191,7 +261,7 @@ export class MarkdownFormatter {
   }
 
   private flatOddsTable(
-    bookmakers: MatchCornerOdds['markets'][number]['bookmakers']
+    bookmakers: MatchOdds['markets'][number]['bookmakers']
   ): string[] {
     const rows = [
       '| Bookmaker | Outcome | Line | Odds |',

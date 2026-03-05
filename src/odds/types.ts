@@ -65,3 +65,6 @@ export interface MatchCornerOdds {
   awayTeam?: string;
   markets: CornerMarket[];
 }
+
+/** Generic alias — same shape for any market (corners, goals, etc.) */
+export type MatchOdds = MatchCornerOdds;

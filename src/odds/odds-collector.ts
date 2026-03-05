@@ -1,18 +1,16 @@
 /**
- * OddsCollector — finds a soccer event and returns its corner betting markets.
+ * OddsCollector — finds a soccer event and returns its betting markets.
  *
  * Flow:
  *  1. Search configured sport keys for an event matching the team names
- *  2. GET /events/{id}/markets  → discover available market keys
- *  3. Filter market keys by MARKET_KEY_FILTER
- *  4. GET /events/{id}/odds     → fetch odds for filtered markets + configured bookmakers
+ *  2. GET /events/{id}/odds → fetch odds for configured market keys + bookmakers
+ *
+ * Parameterised by MarketConfig so the same class works for corners, goals, etc.
  */
 
 import { OddsApiClient } from './odds-api-client';
-import { OddsEvent, MatchCornerOdds, CornerMarket, BookmakerOdds } from './types';
-
-/** Corner market keys to fetch directly — no discovery call needed. */
-const CORNER_MARKET_KEYS = ['alternate_spreads_corners', 'alternate_totals_corners'];
+import { OddsEvent, MatchOdds, CornerMarket, BookmakerOdds } from './types';
+import { MarketConfig, CORNER_MARKET_CONFIG } from './market-config';
 
 const DEFAULT_SPORT_KEYS = ['soccer_epl', 'soccer_uefa_champs_league'];
 
@@ -31,20 +29,22 @@ function resolveRegions(): string {
 
 export class OddsCollector {
   private client: OddsApiClient;
+  private marketConfig: MarketConfig;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, marketConfig: MarketConfig = CORNER_MARKET_CONFIG) {
     this.client = new OddsApiClient(apiKey);
+    this.marketConfig = marketConfig;
   }
 
   /**
-   * Main entry point. Finds the event and returns corner odds from configured bookmakers.
+   * Generic entry point. Finds the event and returns odds for the configured markets.
    * Returns { found: false, markets: [] } gracefully on any failure.
    */
-  async collectCornerOdds(
+  async collectOdds(
     teamA: string,
     teamB: string,
-    _matchDate?: string  // kept for API compatibility; matching is by team name only
-  ): Promise<MatchCornerOdds> {
+    _matchDate?: string
+  ): Promise<MatchOdds> {
     try {
       const result = await this.findEvent(teamA, teamB);
       if (!result) return { found: false, markets: [] };
@@ -82,7 +82,7 @@ export class OddsCollector {
   }
 
   /**
-   * Fetch corner odds directly using known market keys (no discovery call needed).
+   * Fetch odds using the configured market keys.
    */
   private async fetchFilteredOdds(sportKey: string, eventId: string): Promise<CornerMarket[]> {
     const bookmakers = resolveBookmakers();
@@ -90,7 +90,7 @@ export class OddsCollector {
     const opts       = bookmakers ? { bookmakers } : { regions };
 
     const oddsResp = await this.client.getEventOdds(
-      sportKey, eventId, CORNER_MARKET_KEYS.join(','), opts
+      sportKey, eventId, this.marketConfig.keys.join(','), opts
     );
 
     // Aggregate into CornerMarket[]

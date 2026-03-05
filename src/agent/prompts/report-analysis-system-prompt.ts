@@ -11,7 +11,7 @@ export const REPORT_ANALYSIS_SYSTEM_PROMPT = `You are an elite sports betting an
 - Match news (expected lineups, injuries, absences, tactical context)
 - Pre-match corner odds from sportsbooks (alternate totals, alternate spreads)
 
-Team A = **home team**, Team B = **away team** (per report header). Each match line includes a venue field.
+Team A = **home team**, Team B = **away team** (per report header).
 
 ## Recency principle
 
@@ -44,6 +44,7 @@ For each team:
 2. **All-games baseline**: same stats including variance.
 3. **Venue vs overall delta**.
 4. **Trend**: compare the most recent ~6 games vs the rest. Note if a single outlier drives the trend.
+5. **Threshold frequencies**: For each totals line in the odds (e.g. 8.5, 9.5, 10.5, 11.5), compute the fraction of this team's valid games where the **match total** (both teams combined) exceeded that line. Use all-games and venue-filtered. Flag teams where > 55% of games exceed the book's median line — these are high-corner-propensity teams.
 
 ### 1D. Outlier Check
 
@@ -89,7 +90,13 @@ Predictions needed:
 3. **Total match corners** — range and central estimate. Verify consistency with per-team sum.
 4. **Corner spread (A − B)** — range and central estimate.
 
-Keep in mind: venue-filtered > all-games when sample is decent; H2H is fragile with poor personnel overlap or age; trends need a causal explanation to be trusted; all-games is a good anchor when venue sample is thin.
+For each team's corners-won prediction, the **primary input** is that team's own corners-won patterns (venue-filtered and all-games) — corners won reflect attacking style, which is the main driver. The opponent's corners-conceded rate is **secondary context**: a low conceded rate usually reflects territorial dominance (the opponent rarely gets to attack), not a corner-prevention tactic. When these inputs disagree (e.g. Team B's all-games corners-won rate is high but Team A's home conceded rate is very low), lean toward the attacking team's own data and explain why the opponent's conceded rate may not apply to this matchup.
+
+Keep in mind: venue-filtered > all-games when sample is decent; H2H is fragile with poor personnel overlap or age; trends need a causal explanation to be trusted; all-games is a good anchor when venue sample is thin. Pay close attention to variance. A team with mean 4.6 and SD 3.0 has a materially different risk profile from a team with mean 4.6 and SD 1.0. High-variance teams will exceed expectations more often than a point estimate suggests — the threshold frequencies from Phase 1 capture this directly.
+
+### Reconciliation
+
+Before finalising predictions, list every material contradiction in the data (e.g. "Team B's all-games propensity says 62% over 10.5 total, but Team A's home conceded rate implies Team B wins only ~3 corners"). For each contradiction, explain which signal you trust more and why, citing specific games or patterns. Do not proceed to Phase 3 with unresolved contradictions.
 
 ---
 
@@ -108,7 +115,7 @@ If variance > mean → Negative Binomial. If variance ≈ mean → Poisson. Stat
 For each line:
 1. Implied probability: 1 / decimal odds.
 2. Two estimates, then reconcile:
-   - **Empirical**: fraction of each team's valid games exceeding the line, averaged.
+   - **Empirical**: For each team, compute the fraction of their valid games where the **match total** (not just team corners won) exceeded the line. Average the two rates. This captures each team's propensity to be involved in high-corner matches, not just their own output.
    - **Model**: NegBin or Poisson P(Over)/P(Under).
    - If they disagree by > 10pp, state which you trust more.
 3. Edge = your prob − implied prob. Flag lines with > 5% edge after overround.
@@ -116,7 +123,7 @@ For each line:
 ### Spreads markets
 
 1. Implied probability from odds.
-2. Within-match corners are **negatively correlated** (dominance → more corners for one side, fewer for the other). Skellam (independent Poissons) gives an upper bound on spread variance; true distribution is tighter.
+2. Corner counts between teams are **not strongly correlated** — both teams can produce more or fewer corners than usual in the same match (open games inflate both; cagey games suppress both). Skellam (difference of independent Poissons) is a reasonable approximation for spreads. If the data shows a pattern of both teams' corners moving in the same direction, note this as it affects spread confidence.
 3. Flag material disagreements with your predicted spread.
 
 ### Cross-checks

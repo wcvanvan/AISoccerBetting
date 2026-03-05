@@ -39,7 +39,7 @@ const PROGRESS_INTERVAL_SEC = 60;
  * Controlled by ANALYSIS_TIMEOUT (seconds, default 300). Logs progress
  * every 30s so the user knows it hasn't hung.
  */
-export async function analyzeReport(report: string): Promise<string> {
+export async function analyzeReport(report: string, systemPrompt?: string): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
     throw new Error('Set ANTHROPIC_API_KEY in .env to run report analysis.');
@@ -64,7 +64,7 @@ export async function analyzeReport(report: string): Promise<string> {
   const hasTavily = !!process.env.TAVILY_API_KEY?.trim();
 
   const messages = [
-    new SystemMessage(REPORT_ANALYSIS_SYSTEM_PROMPT),
+    new SystemMessage(systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT),
     new HumanMessage(report),
   ];
 
