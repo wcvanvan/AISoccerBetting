@@ -14,6 +14,21 @@ const safeMarked = new Marked({
   },
 });
 
+/** Server-side cache: rendered HTML keyed by filepath + mtime to avoid re-parsing */
+const htmlCache = new Map<string, { mtime: number; html: string }>();
+
+async function renderCached(filePath: string): Promise<string> {
+  const stat = fs.statSync(filePath);
+  const entry = htmlCache.get(filePath);
+  if (entry && entry.mtime === stat.mtimeMs) {
+    return entry.html;
+  }
+  const markdown = fs.readFileSync(filePath, 'utf8');
+  const html = wrapTables(await safeMarked.parse(markdown));
+  htmlCache.set(filePath, { mtime: stat.mtimeMs, html });
+  return html;
+}
+
 /** Wrap <table> elements in a scrollable container for wide data tables */
 function wrapTables(html: string): string {
   return html.replace(/<table[^>]*>/g, '<div class="table-wrap">$&').replace(/<\/table>/g, '</table></div>');
@@ -35,9 +50,8 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Report not yet available' };
     }
 
-    const markdown = fs.readFileSync(job.reportPath, 'utf8');
-    const html = wrapTables(await safeMarked.parse(markdown));
-    return { html, markdown };
+    const html = await renderCached(job.reportPath);
+    return { html };
   });
 
   /** Get the full analysis as rendered HTML */
@@ -55,9 +69,8 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Analysis not yet available' };
     }
 
-    const markdown = fs.readFileSync(job.analysisPath, 'utf8');
-    const html = wrapTables(await safeMarked.parse(markdown));
-    return { html, markdown };
+    const html = await renderCached(job.analysisPath);
+    return { html };
   });
 
   /** Get concise value picks extracted from the analysis */
@@ -77,8 +90,18 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
 
     const markdown = fs.readFileSync(job.analysisPath, 'utf8');
     const concise = extractValuePicks(markdown);
-    const html = wrapTables(await safeMarked.parse(concise));
-    return { html, markdown: concise };
+    // Use a virtual key for concise cache (different from full analysis)
+    const conciseKey = job.analysisPath + ':concise';
+    const stat = fs.statSync(job.analysisPath);
+    const entry = htmlCache.get(conciseKey);
+    let html: string;
+    if (entry && entry.mtime === stat.mtimeMs) {
+      html = entry.html;
+    } else {
+      html = wrapTables(await safeMarked.parse(concise));
+      htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
+    }
+    return { html };
   });
 }
 

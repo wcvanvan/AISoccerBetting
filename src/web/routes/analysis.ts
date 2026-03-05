@@ -212,6 +212,28 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  /** Check cache status for all markets of a given match */
+  app.get('/api/cache-status', async (request) => {
+    const query = request.query as { homeTeam?: string; awayTeam?: string; date?: string };
+    const homeTeam = query.homeTeam?.trim();
+    const awayTeam = query.awayTeam?.trim();
+    const date = query.date?.trim();
+
+    if (!homeTeam || !awayTeam || !date) {
+      return { markets: {} };
+    }
+
+    const markets: Record<string, { hasReport: boolean; hasAnalysis: boolean }> = {};
+    for (const m of ['goals', 'corners', 'cards'] as MarketType[]) {
+      const cached = getCachedPaths(homeTeam, awayTeam, date, m);
+      markets[m] = {
+        hasReport: !!cached.reportPath,
+        hasAnalysis: !!cached.analysisPath,
+      };
+    }
+    return { markets };
+  });
+
   /** List all jobs */
   app.get('/api/jobs', async () => {
     return { jobs: jobManager.getAll() };

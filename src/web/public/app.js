@@ -92,9 +92,12 @@ function renderEvents(events) {
     return;
   }
 
-  // Update match count in heading
+  // Update match count and timestamp in heading
   const heading = document.querySelector('#page-matches .section-title');
-  if (heading) heading.innerHTML = 'Upcoming Matches <span class="match-count">(' + events.length + ')</span>';
+  if (heading) {
+    const timeStr = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    heading.innerHTML = 'Upcoming Matches <span class="match-count">(' + events.length + ' &middot; updated ' + timeStr + ')</span>';
+  }
 
   // Custom match form
   const customForm = document.createElement('div');
@@ -127,7 +130,7 @@ function renderEvents(events) {
     const away = document.getElementById('custom-away').value.trim();
     const date = document.getElementById('custom-date').value.trim();
     const market = document.getElementById('custom-market').value;
-    if (!home || !away || !date) { alert('Fill in all fields'); return; }
+    if (!home || !away || !date) { showToast('Fill in all fields', 'error'); return; }
     launchWithCacheCheck(home, away, date, market, true);
   });
   document.getElementById('custom-collect').addEventListener('click', () => {
@@ -135,7 +138,7 @@ function renderEvents(events) {
     const away = document.getElementById('custom-away').value.trim();
     const date = document.getElementById('custom-date').value.trim();
     const market = document.getElementById('custom-market').value;
-    if (!home || !away || !date) { alert('Fill in all fields'); return; }
+    if (!home || !away || !date) { showToast('Fill in all fields', 'error'); return; }
     launchWithCacheCheck(home, away, date, market, false);
   });
 
@@ -144,7 +147,7 @@ function renderEvents(events) {
   table.className = 'events-table';
 
   const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Market</th><th>Actions</th></tr>';
+  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Market</th><th>Cached</th><th>Actions</th></tr>';
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
@@ -197,6 +200,13 @@ function renderEvents(events) {
     tdMarket.appendChild(select);
     tr.appendChild(tdMarket);
 
+    // Cache status cell
+    const tdCache = document.createElement('td');
+    tdCache.className = 'cache-cell';
+    tdCache.id = 'cache-' + idx;
+    tdCache.innerHTML = '<span class="cache-loading">...</span>';
+    tr.appendChild(tdCache);
+
     // Actions cell
     const tdActions = document.createElement('td');
     const btnAnalyze = document.createElement('button');
@@ -223,6 +233,63 @@ function renderEvents(events) {
 
   table.appendChild(tbody);
   container.appendChild(table);
+
+  // Fetch cache status for each event (batched, non-blocking)
+  loadCacheStatuses(events);
+}
+
+async function loadCacheStatuses(events) {
+  // Deduplicate by match key to avoid redundant API calls
+  const seen = new Set();
+  const tasks = [];
+  events.forEach((e, idx) => {
+    const key = e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
+    if (seen.has(key)) return;
+    seen.add(key);
+    tasks.push({ idx, e });
+  });
+
+  // Fetch in parallel batches of 6
+  for (let i = 0; i < tasks.length; i += 6) {
+    const batch = tasks.slice(i, i + 6);
+    await Promise.all(batch.map(async ({ idx, e }) => {
+      try {
+        const params = new URLSearchParams({
+          homeTeam: e.home_team,
+          awayTeam: e.away_team,
+          date: e.commence_time.slice(0, 10),
+        });
+        const resp = await fetch('/api/cache-status?' + params);
+        const data = await resp.json();
+        renderCacheBadges(idx, data.markets || {});
+      } catch (_) {
+        const cell = document.getElementById('cache-' + idx);
+        if (cell) cell.innerHTML = '';
+      }
+    }));
+  }
+}
+
+function renderCacheBadges(idx, markets) {
+  const cell = document.getElementById('cache-' + idx);
+  if (!cell) return;
+  cell.innerHTML = '';
+  const marketNames = ['goals', 'corners', 'cards'];
+  let hasSome = false;
+  marketNames.forEach((m) => {
+    const info = markets[m];
+    if (info && (info.hasReport || info.hasAnalysis)) {
+      hasSome = true;
+      const badge = document.createElement('span');
+      badge.className = 'cache-badge' + (info.hasAnalysis ? ' cache-full' : ' cache-partial');
+      badge.title = m + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
+      badge.textContent = m.charAt(0).toUpperCase();
+      cell.appendChild(badge);
+    }
+  });
+  if (!hasSome) {
+    cell.innerHTML = '<span class="cache-none">&mdash;</span>';
+  }
 }
 
 // ── Analysis ────────────────────────────────────────────────────────────────
@@ -246,7 +313,7 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn, f
     const data = await resp.json();
 
     if (data.error) {
-      alert('Error: ' + data.error);
+      showToast(data.error, 'error');
       return;
     }
 
@@ -273,7 +340,7 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn, f
 
     connectSSE(data.jobId);
   } catch (err) {
-    alert('Failed to start analysis: ' + err.message);
+    showToast('Failed to start: ' + err.message, 'error');
   } finally {
     if (triggerBtn) {
       triggerBtn.disabled = false;
@@ -351,15 +418,41 @@ function renderJobProgress(jobId, home, away, date, market, skipTimer, isCached)
   statusArea.append(elapsed, status);
   header.append(info, statusArea);
 
+  // Step progress bar
+  const stepsBar = document.createElement('div');
+  stepsBar.className = 'steps-bar';
+  stepsBar.id = 'job-steps-' + jobId;
+  ['Collect', 'Process', 'Analyze', 'Done'].forEach((label) => {
+    const step = document.createElement('div');
+    step.className = 'step';
+    step.textContent = label;
+    stepsBar.appendChild(step);
+  });
+
+  // Collapsible log toggle
+  const logToggle = document.createElement('div');
+  logToggle.className = 'log-toggle';
+  const arrow = document.createElement('span');
+  arrow.className = 'arrow' + (isCached ? '' : ' open');
+  arrow.textContent = '\u25B6';
+  const toggleLabel = document.createElement('span');
+  toggleLabel.textContent = 'Pipeline Logs';
+  logToggle.append(arrow, toggleLabel);
+
   const log = document.createElement('div');
-  log.className = 'progress-log';
+  log.className = 'progress-log' + (isCached ? ' collapsed' : '');
   log.id = 'job-log-' + jobId;
+
+  logToggle.addEventListener('click', () => {
+    log.classList.toggle('collapsed');
+    arrow.classList.toggle('open');
+  });
 
   const results = document.createElement('div');
   results.id = 'job-results-' + jobId;
   results.style.marginTop = '16px';
 
-  card.append(header, log, results);
+  card.append(header, stepsBar, logToggle, log, results);
   container.appendChild(card);
 
   // Start elapsed timer (skip when viewing historical jobs)
@@ -400,7 +493,11 @@ function connectSSE(jobId) {
     eventSource.close();
     eventSource = null;
     updateJobStatus(jobId, 'complete', 'Complete!');
-    renderResults(jobId);
+    showToast('Analysis complete!', 'success');
+    renderResults(jobId).then(() => {
+      const el = document.getElementById('job-results-' + jobId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   });
 
   eventSource.addEventListener('error', (e) => {
@@ -437,6 +534,8 @@ function updateJobStatus(jobId, status, message) {
     failed: 'Failed',
   };
 
+  const steps = ['collecting', 'collected', 'analyzing', 'complete'];
+
   const spinnerStatuses = ['pending', 'collecting', 'analyzing'];
   el.className = 'job-status status-' + status;
   el.innerHTML = '';
@@ -447,6 +546,16 @@ function updateJobStatus(jobId, status, message) {
     el.appendChild(document.createTextNode(' '));
   }
   el.appendChild(document.createTextNode(labels[status] || status));
+
+  // Update step progress bar
+  const stepsEl = document.getElementById('job-steps-' + jobId);
+  if (stepsEl && status !== 'failed') {
+    const currentIdx = steps.indexOf(status);
+    stepsEl.querySelectorAll('.step').forEach((step, i) => {
+      step.classList.toggle('step-done', i <= currentIdx);
+      step.classList.toggle('step-active', i === currentIdx && currentIdx < steps.length - 1);
+    });
+  }
 
   // Stop elapsed timer on terminal states
   if ((status === 'complete' || status === 'failed') && elapsedTimer) {
@@ -629,7 +738,7 @@ async function viewJob(jobId) {
     const job = await resp.json();
 
     if (job.error && !job.id) {
-      alert(job.error);
+      showToast(job.error, 'error');
       return;
     }
 
@@ -651,7 +760,7 @@ async function viewJob(jobId) {
       connectSSE(jobId);
     }
   } catch (err) {
-    alert('Failed to load job: ' + err.message);
+    showToast('Failed to load job: ' + err.message, 'error');
   }
 }
 
@@ -664,8 +773,38 @@ function esc(s) {
   return div.innerHTML;
 }
 
+// Toast notification system
+function showToast(message, type) {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (type ? ' toast-' + type : '');
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
   loadEvents();
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    // Escape: go back to matches from results page
+    if (e.key === 'Escape') {
+      const resultsPage = document.getElementById('page-results');
+      if (resultsPage && resultsPage.classList.contains('active')) {
+        showPage('matches');
+      }
+    }
+  });
 });
