@@ -49,6 +49,15 @@ DEFAULT_LEAGUES = [
 
 SOURCES = ["espn", "understat"]
 
+# Understat only covers the big 5 European leagues
+UNDERSTAT_LEAGUES = [
+    "ENG-Premier League",
+    "ESP-La Liga",
+    "GER-Bundesliga",
+    "ITA-Serie A",
+    "FRA-Ligue 1",
+]
+
 TIMEOUT_SECONDS = 120
 
 
@@ -347,15 +356,18 @@ class DataAssembler:
         summaries = self._fetch_summaries(game_ids)
         matches = self._enrich_from_summaries(matches, summaries, team)
 
-        # 2. Enrichment: Understat (xG)
+        # 2. Enrichment: Understat (xG) — only for big-5 leagues
         if "understat" in sources:
-            try:
-                log.info("Fetching Understat xG data...")
-                import soccerdata as sd; us = sd.Understat(self._leagues, self._seasons)
-                stats = us.read_team_match_stats()
-                matches = self._enrich_with_understat(matches, stats, team)
-            except Exception as exc:
-                log.warning("Understat enrichment failed: %s", exc)
+            us_leagues = [l for l in self._leagues if l in UNDERSTAT_LEAGUES]
+            if us_leagues:
+                try:
+                    log.info("Fetching Understat xG data...")
+                    import soccerdata as sd
+                    us = sd.Understat(us_leagues, self._seasons)
+                    stats = us.read_team_match_stats()
+                    matches = self._enrich_with_understat(matches, stats, team)
+                except Exception as exc:
+                    log.warning("Understat enrichment failed: %s", exc)
 
         return matches[:limit]
 
@@ -389,12 +401,15 @@ class DataAssembler:
 
         # Enrichment (same as recent matches but for both teams)
         if "understat" in sources:
-            try:
-                import soccerdata as sd; us = sd.Understat(self._leagues, self._seasons)
-                stats = us.read_team_match_stats()
-                h2h_matches = self._enrich_h2h_understat(h2h_matches, stats, team_a, team_b)
-            except Exception as exc:
-                log.warning("H2H Understat enrichment failed: %s", exc)
+            us_leagues = [l for l in self._leagues if l in UNDERSTAT_LEAGUES]
+            if us_leagues:
+                try:
+                    import soccerdata as sd
+                    us = sd.Understat(us_leagues, self._seasons)
+                    stats = us.read_team_match_stats()
+                    h2h_matches = self._enrich_h2h_understat(h2h_matches, stats, team_a, team_b)
+                except Exception as exc:
+                    log.warning("H2H Understat enrichment failed: %s", exc)
 
         return h2h_matches
 
@@ -931,59 +946,92 @@ class DataAssembler:
 
     # ── Understat enrichment ─────────────────────────────────────────────
 
+    @staticmethod
+    def _fuzzy_team_match(name: str, candidate: str) -> bool:
+        """Check if team names match (case-insensitive, substring)."""
+        a, b = name.lower(), candidate.lower()
+        return a in b or b in a
+
+    @staticmethod
+    def _parse_date(val: Any) -> str:
+        """Parse a date value to YYYY-MM-DD string."""
+        if val is None:
+            return ""
+        try:
+            return pd.Timestamp(val).strftime("%Y-%m-%d")
+        except Exception:
+            return str(val)[:10]
+
     def _enrich_with_understat(
         self,
         matches: list[dict[str, Any]],
-        stats: pd.DataFrame,
+        us_df: pd.DataFrame,
         team: str,
     ) -> list[dict[str, Any]]:
-        """Enrich matches with xG from Understat."""
-        if stats is None or stats.empty:
+        """Enrich matches with xG from Understat.
+
+        Understat's read_team_match_stats() returns per-match rows with
+        home_team/away_team and home_xg/away_xg columns (not per-team).
+        """
+        if us_df is None or us_df.empty:
             return matches
 
-        df = stats.reset_index() if stats.index.names[0] is not None else stats
-        norm_team = team.lower()
+        df = us_df.reset_index() if us_df.index.names[0] is not None else us_df
 
         for match in matches:
             date_str = match.get("date", "")
             if not date_str:
                 continue
 
-            # Find matching row by date and team
             for _, row in df.iterrows():
-                row_team = str(row.get("team", "")).lower()
-                row_date = ""
-                rd = row.get("date")
-                if rd is not None:
-                    try:
-                        row_date = pd.Timestamp(rd).strftime("%Y-%m-%d")
-                    except Exception:
-                        row_date = str(rd)[:10]
+                row_date = self._parse_date(row.get("date"))
+                if row_date != date_str:
+                    continue
 
-                if row_date == date_str and (norm_team in row_team or row_team in norm_team):
-                    extras = match.setdefault("extras", {})
-                    xg = row.get("xG") or row.get("xg")
-                    if xg is not None and not pd.isna(xg):
-                        extras["xG"] = round(float(xg), 2)
-                    xga = row.get("xGA") or row.get("xga")
-                    if xga is not None and not pd.isna(xga):
-                        extras["xGA"] = round(float(xga), 2)
-                    break
+                home = str(row.get("home_team", ""))
+                away = str(row.get("away_team", ""))
+                is_home = self._fuzzy_team_match(team, home)
+                is_away = self._fuzzy_team_match(team, away)
+                if not is_home and not is_away:
+                    continue
+
+                # Team's xG and opponent's xG
+                if is_home:
+                    team_xg = row.get("home_xg")
+                    opp_xg = row.get("away_xg")
+                else:
+                    team_xg = row.get("away_xg")
+                    opp_xg = row.get("home_xg")
+
+                extras = match.setdefault("extras", {})
+                if team_xg is not None and not pd.isna(team_xg):
+                    xg_val = round(float(team_xg), 2)
+                    extras["xG"] = xg_val
+                    m_stats = match.setdefault("stats", {})
+                    if m_stats.get("expected_goals") is None:
+                        m_stats["expected_goals"] = xg_val
+                if opp_xg is not None and not pd.isna(opp_xg):
+                    xga_val = round(float(opp_xg), 2)
+                    extras["xGA"] = xga_val
+                    opp_stats = match.setdefault("opponent_stats", {})
+                    if opp_stats.get("expected_goals") is None:
+                        opp_stats["expected_goals"] = xga_val
+                break
 
         return matches
 
     def _enrich_h2h_understat(
         self,
         h2h_matches: list[dict[str, Any]],
-        stats: pd.DataFrame,
+        us_df: pd.DataFrame,
         team_a: str,
         team_b: str,
     ) -> list[dict[str, Any]]:
         """Enrich H2H matches with xG from Understat for both teams."""
-        if stats is None or stats.empty:
+        if us_df is None or us_df.empty:
             return h2h_matches
 
-        df = stats.reset_index() if stats.index.names[0] is not None else stats
+        df = us_df.reset_index() if us_df.index.names[0] is not None else us_df
 
         for match in h2h_matches:
             date_str = match.get("date", "")
@@ -991,33 +1039,43 @@ class DataAssembler:
                 continue
 
             for _, row in df.iterrows():
-                row_team = str(row.get("team", "")).lower()
-                row_date = ""
-                rd = row.get("date")
-                if rd is not None:
-                    try:
-                        row_date = pd.Timestamp(rd).strftime("%Y-%m-%d")
-                    except Exception:
-                        row_date = str(rd)[:10]
-
+                row_date = self._parse_date(row.get("date"))
                 if row_date != date_str:
                     continue
 
-                norm_a = team_a.lower()
-                norm_b = team_b.lower()
-                is_a = norm_a in row_team or row_team in norm_a
-                is_b = norm_b in row_team or row_team in norm_b
+                home = str(row.get("home_team", ""))
+                away = str(row.get("away_team", ""))
 
-                if is_a:
-                    extras = match.setdefault("teamA_extras", {})
-                    xg = row.get("xG") or row.get("xg")
-                    if xg is not None and not pd.isna(xg):
-                        extras["xG"] = round(float(xg), 2)
-                elif is_b:
-                    extras = match.setdefault("teamB_extras", {})
-                    xg = row.get("xG") or row.get("xg")
-                    if xg is not None and not pd.isna(xg):
-                        extras["xG"] = round(float(xg), 2)
+                # Determine which is team_a and team_b
+                a_is_home = self._fuzzy_team_match(team_a, home)
+                a_is_away = self._fuzzy_team_match(team_a, away)
+                b_is_home = self._fuzzy_team_match(team_b, home)
+                b_is_away = self._fuzzy_team_match(team_b, away)
+
+                if not ((a_is_home or a_is_away) and (b_is_home or b_is_away)):
+                    continue
+
+                home_xg = row.get("home_xg")
+                away_xg = row.get("away_xg")
+
+                # Assign xG to team_a
+                a_xg = home_xg if a_is_home else away_xg
+                if a_xg is not None and not pd.isna(a_xg):
+                    xg_val = round(float(a_xg), 2)
+                    match.setdefault("teamA_extras", {})["xG"] = xg_val
+                    a_stats = match.setdefault("teamA_stats", {})
+                    if a_stats.get("expected_goals") is None:
+                        a_stats["expected_goals"] = xg_val
+
+                # Assign xG to team_b
+                b_xg = home_xg if b_is_home else away_xg
+                if b_xg is not None and not pd.isna(b_xg):
+                    xg_val = round(float(b_xg), 2)
+                    match.setdefault("teamB_extras", {})["xG"] = xg_val
+                    b_stats = match.setdefault("teamB_stats", {})
+                    if b_stats.get("expected_goals") is None:
+                        b_stats["expected_goals"] = xg_val
+                break
 
         return h2h_matches
 

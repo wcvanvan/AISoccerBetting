@@ -113,10 +113,11 @@ export class MarkdownFormatter {
         line1 += this.formatCardStatsInline(m.stats, m.opponent_stats, m.card_events, m.opponent_card_events);
       }
 
-      // Render extras if present
+      // Render extras if present (skip xG/xGA in goal mode — already shown inline)
       if (m.extras && Object.keys(m.extras).length > 0) {
-        const extrasStr = this.formatExtras(m.extras);
-        line1 += ` · ${extrasStr}`;
+        const skip = isGoalMode ? new Set(['xG', 'xGA']) : undefined;
+        const extrasStr = this.formatExtras(m.extras, skip);
+        if (extrasStr) line1 += ` · ${extrasStr}`;
       }
 
       const lineup = this.formatLineup(m.starting_lineup, m.starters_subbed_off, m.substitutes);
@@ -295,12 +296,15 @@ export class MarkdownFormatter {
         header += this.formatH2HCardStats(m, teamA, teamB);
       }
 
-      // Render extras if present
+      // Render extras if present (skip xG in goal mode — already shown inline)
+      const skipKeys = isGoalMode ? new Set(['xG', 'xGA']) : undefined;
       if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
-        header += ` · ${teamA}: ${this.formatExtras(m.teamA_extras)}`;
+        const s = this.formatExtras(m.teamA_extras, skipKeys);
+        if (s) header += ` · ${teamA}: ${s}`;
       }
       if (m.teamB_extras && Object.keys(m.teamB_extras).length > 0) {
-        header += ` · ${teamB}: ${this.formatExtras(m.teamB_extras)}`;
+        const s = this.formatExtras(m.teamB_extras, skipKeys);
+        if (s) header += ` · ${teamB}: ${s}`;
       }
 
       const lineA = `${teamA} (${m.teamA_formation ?? '-'}): ${this.formatLineup(m.teamA_lineup, m.teamA_starters_subbed_off, m.teamA_substitutes)}`;
@@ -381,9 +385,9 @@ export class MarkdownFormatter {
     pass_completion_pct: 'Pass%',
   };
 
-  private formatExtras(extras: Record<string, string | number | null>): string {
+  private formatExtras(extras: Record<string, string | number | null>, skip?: Set<string>): string {
     return Object.entries(extras)
-      .filter(([, v]) => v != null)
+      .filter(([k, v]) => v != null && !(skip?.has(k)))
       .map(([key, val]) => {
         const label = MarkdownFormatter.EXTRAS_LABELS[key] ?? this.readableKey(key);
         return `${label}: ${val}`;
