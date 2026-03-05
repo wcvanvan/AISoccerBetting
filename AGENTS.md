@@ -2,34 +2,36 @@
 
 ## Project Overview
 
-TypeScript CLI for soccer corner-kick betting analysis. Three data pipelines run in parallel to produce a data report, then an analysis agent identifies value bets.
+TypeScript CLI for multi-market soccer betting analysis (corners, goals, cards). Three data pipelines run in parallel to produce a data report, then an analysis agent identifies value bets.
 
 **Data collection** (parallel):
 
-1. **soccerdata bridge** — Python subprocess merging ESPN (schedule, lineups, corners) and Understat (xG) via the `soccerdata` library.
+1. **soccerdata bridge** — Python subprocess merging ESPN (schedule, lineups, corners, goals, cards, shots, fouls) and Understat (xG) via the `soccerdata` library.
 2. **Match news agent** — LangChain (Claude Sonnet + Tavily) fetches absences, injuries, and tactical news from the web.
 3. **Odds** — The Odds API fetches pre-match markets from configured bookmakers.
 
-**Analysis** — Claude Opus reads the collected report (and optionally searches the web via Tavily) to perform statistical analysis, model corner totals and compare predictions against sportsbook lines to find value picks.
+**Analysis** — Claude Opus reads the collected report (and optionally searches the web via Tavily) to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own analysis system prompt.
 
-Output: data report (`{slug}.md`), analysis (`{slug}-analysis.md`), or standalone news (`{slug}-news.md`).
+Output: data report (`{slug}-{market}.md`), analysis (`{slug}-{market}-analysis.md`), or standalone news (`{slug}-news.md`).
 
 ## Commands
 
 ```bash
 npm run build                                             # compile TypeScript → dist/
-npm run corners "TeamA" "TeamB" "YYYY-MM-DD"              # collect data → {slug}.md
-npm run corners:analyze <report.md>                       # analyse existing report
-npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"         # fetch match news only
-npm run corners:odds "TeamA" "TeamB"                      # corner odds for a match
-npm run corners:odds                                      # list upcoming events
+npm run corners "TeamA" "TeamB" "YYYY-MM-DD"              # collect corner data → {slug}-corners.md
+npm run goals "TeamA" "TeamB" "YYYY-MM-DD"                # collect goal data → {slug}-goals.md
+npm run cards "TeamA" "TeamB" "YYYY-MM-DD"                # collect card data → {slug}-cards.md
+npm run {market}:analyze <report.md>                      # analyse existing report
+npm run {market}:news "TeamA" "TeamB" "YYYY-MM-DD"        # fetch match news only
+npm run {market}:odds "TeamA" "TeamB"                     # odds for a match
+npm run {market}:odds                                     # list upcoming events
 npm run test:connection                                   # smoke test Claude API
 ```
 
 ## Architecture
 
 ```
-CLI (src/cli-corners.ts)
+CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
  │
  └─ runPipeline (src/cli-shared.ts)
      │
@@ -43,7 +45,7 @@ CLI (src/cli-corners.ts)
      │    │              ├── sd.ESPN
      │    │              └──  sd.Understat
      │    │
-     │    ├─ OddsCollector (src/odds/) → corner odds from The Odds API
+     │    ├─ OddsCollector (src/odds/) → market-specific odds from The Odds API
      │    └─ MarkdownFormatter (src/formatter/) → report.md
      │
      └─ analyzeReport (src/agent/) [if ANALYSIS_ENABLED=true]
@@ -70,12 +72,14 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 
 - `OddsApiClient` — HTTP wrapper for The Odds API v4 (`getEvents`, `getEventOdds`).
 - `OddsCollector` — finds event by fuzzy team name, fetches markets using configured `MarketConfig` keys. Parameterised to support different markets (corners, goals, etc.).
-- `MarketConfig` — interface defining market keys and label. `CORNER_MARKET_CONFIG` and `GOAL_MARKET_CONFIG` constants provided.
+- `MarketConfig` — interface defining market keys and label. `CORNER_MARKET_CONFIG`, `GOAL_MARKET_CONFIG`, and `CARD_MARKET_CONFIG` constants provided.
 
 ### Analysis agent (src/agent/)
 
 - `report-analyzer.ts` — LangChain agent using `ANALYSIS_MODEL` (Opus) with extended thinking. Accepts an optional system prompt parameter for market-specific analysis. If `TAVILY_API_KEY` is set, the agent can search the web for supplementary data; otherwise falls back to single-shot.
-- `prompts/report-analysis-system-prompt.ts` — instructs Opus to: perform venue-filtered statistical analysis, player/sub correlation, formation analysis, outlier handling, absence impact assessment, then compare predictions against sportsbook lines using Negative Binomial distribution + empirical frequencies.
+- `prompts/report-analysis-system-prompt.ts` — corner analysis prompt. Instructs Opus to: perform venue-filtered statistical analysis, player/sub correlation, formation analysis, outlier handling, absence impact assessment, then compare predictions against sportsbook lines using Negative Binomial distribution + empirical frequencies.
+- `prompts/goal-analysis-system-prompt.ts` — goal market analysis prompt (xG-based modeling, BTTS, spreads, totals).
+- `prompts/card-analysis-system-prompt.ts` — card market analysis prompt (foul/card modeling, referee tendencies).
 - Token budget: `ANALYSIS_MAX_TOKENS` (total incl. thinking, default 32768), `ANALYSIS_THINKING_BUDGET` (internal reasoning, default 10000, 0 to disable).
 - Timeout: controlled by `ANALYSIS_TIMEOUT`. Progress is logged to stderr every 60s.
 
@@ -89,8 +93,8 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 
 | File | Format | Purpose |
 |---|---|---|
-| `{slug}.md` | Compact, structured | Data report — for downstream agents and as input to analysis |
-| `{slug}-analysis.md` | Human-readable markdown | Opus betting analysis — value picks, stats, caveats |
+| `{slug}-{market}.md` | Compact, structured | Data report — for downstream agents and as input to analysis |
+| `{slug}-{market}-analysis.md` | Human-readable markdown | Opus betting analysis — value picks, stats, caveats |
 | `{slug}-news.md` | Plain text with source URLs | Match news only (absences, injuries, tactical notes) |
 
 ## Project structure
@@ -98,6 +102,8 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 ```
 src/
 ├── cli-corners.ts          # CLI entry point (corner markets)
+├── cli-goals.ts            # CLI entry point (goal markets)
+├── cli-cards.ts            # CLI entry point (card markets)
 ├── cli-shared.ts           # shared pipeline logic
 ├── index.ts                # library exports
 ├── agent/                  # analyzer + match news (LangChain + Claude + Tavily)

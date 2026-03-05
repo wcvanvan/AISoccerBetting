@@ -50,7 +50,7 @@ npm run corners:analyze <report.md>
 npm run cards:analyze <report.md>
 ```
 
-Reads an existing report and runs Claude Opus analysis. Writes `{slug}-analysis.md`.
+Reads an existing report and runs Claude Opus analysis. Writes `{slug}-{market}-analysis.md`.
 
 When running from Claude Code, analysis and news collection can use subagents instead of API calls (no ANTHROPIC_API_KEY needed).
 
@@ -58,6 +58,8 @@ When running from Claude Code, analysis and news collection can use subagents in
 
 ```bash
 npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
+npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
+npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
 ```
 
 Runs the LangChain + Tavily match news agent (absences, injuries, lineups). Writes `{slug}-news.md`.
