@@ -644,6 +644,16 @@ class DataAssembler:
             "redCards": "red_cards",
             "possessionPct": "possession",
         }
+        # Additional stats stored in extras (not in typed MatchStats)
+        extras_map = {
+            "blockedShots": "blockedShots",
+            "offsides": "offsides",
+            "penaltyKickGoals": "penKickGoals",
+            "penaltyKickShots": "penKickShots",
+            "totalCrosses": "crosses",
+            "accurateCrosses": "crossesAcc",
+        }
+        extras: dict[str, Any] = {}
         for stat in team_data.get("statistics", []):
             name = stat.get("name", "")
             if name in stat_map:
@@ -653,7 +663,14 @@ class DataAssembler:
                         stats[stat_map[name]] = float(val) if "." in str(val) else int(val)
                 except (ValueError, TypeError):
                     pass
-        return stats
+            elif name in extras_map:
+                try:
+                    val = stat.get("displayValue")
+                    if val is not None:
+                        extras[extras_map[name]] = float(val) if "." in str(val) else int(val)
+                except (ValueError, TypeError):
+                    pass
+        return stats | ({"_extras": extras} if extras else {})
 
     @staticmethod
     def _extract_goal_events(data: dict, team_idx: int) -> list[dict[str, str]]:
@@ -789,9 +806,25 @@ class DataAssembler:
 
             # -- Stats --
             if team_idx is not None and team_idx < len(teams_data):
-                match["stats"] = self._extract_stats(teams_data[team_idx])
+                raw_stats = self._extract_stats(teams_data[team_idx])
+                team_espn_extras = raw_stats.pop("_extras", {})
+                match["stats"] = raw_stats
+            else:
+                team_espn_extras = {}
             if opp_idx is not None and opp_idx < len(teams_data):
-                match["opponent_stats"] = self._extract_stats(teams_data[opp_idx])
+                raw_opp = self._extract_stats(teams_data[opp_idx])
+                opp_espn_extras = raw_opp.pop("_extras", {})
+                match["opponent_stats"] = raw_opp
+            else:
+                opp_espn_extras = {}
+            # Merge ESPN extras into match extras
+            if team_espn_extras or opp_espn_extras:
+                extras = match.setdefault("extras", {}) or {}
+                match["extras"] = extras
+                extras.update(team_espn_extras)
+                # Prefix opponent extras with "opp"
+                for k, v in opp_espn_extras.items():
+                    extras[f"opp{k[0].upper()}{k[1:]}"] = v
 
             # -- HT score --
             home_ht, away_ht = self._extract_ht_score(data)
@@ -891,7 +924,13 @@ class DataAssembler:
                     h2h[f"{prefix}_corners"] = int(stat.get("displayValue", 0))
 
             # Stats
-            h2h[f"{prefix}_stats"] = self._extract_stats(td)
+            raw_stats = self._extract_stats(td)
+            espn_extras = raw_stats.pop("_extras", {})
+            h2h[f"{prefix}_stats"] = raw_stats
+            if espn_extras:
+                ext = h2h.setdefault(f"{prefix}_extras", {}) or {}
+                h2h[f"{prefix}_extras"] = ext
+                ext.update(espn_extras)
 
             # Formation + lineup from roster
             if i < len(rosters):
