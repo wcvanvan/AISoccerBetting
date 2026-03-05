@@ -245,9 +245,21 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
   }
 }
 
+let elapsedTimer = null;
+
 function renderJobProgress(jobId, home, away, date, market) {
   const container = document.getElementById('results-container');
   const marketLabel = market.charAt(0).toUpperCase() + market.slice(1);
+
+  container.innerHTML = '';
+
+  // Back link
+  const backLink = document.createElement('a');
+  backLink.href = '#';
+  backLink.style.cssText = 'font-size: 13px; color: var(--text-dim); text-decoration: none; display: inline-block; margin-bottom: 12px;';
+  backLink.textContent = '\u2190 Back to matches';
+  backLink.addEventListener('click', (e) => { e.preventDefault(); showPage('matches'); });
+  container.appendChild(backLink);
 
   const card = document.createElement('div');
   card.className = 'job-card';
@@ -265,12 +277,21 @@ function renderJobProgress(jobId, home, away, date, market) {
   meta.textContent = date + ' \u00B7 ' + marketLabel + ' market';
   info.append(title, meta);
 
+  const statusArea = document.createElement('div');
+  statusArea.style.cssText = 'display: flex; align-items: center; gap: 12px';
+
+  const elapsed = document.createElement('span');
+  elapsed.id = 'job-elapsed-' + jobId;
+  elapsed.style.cssText = 'font-size: 12px; color: var(--text-dim); font-family: var(--mono)';
+  elapsed.textContent = '0s';
+
   const status = document.createElement('span');
   status.className = 'job-status status-pending';
   status.id = 'job-status-' + jobId;
   status.innerHTML = '<span class="spinner"></span> Pending';
 
-  header.append(info, status);
+  statusArea.append(elapsed, status);
+  header.append(info, statusArea);
 
   const log = document.createElement('div');
   log.className = 'progress-log';
@@ -281,8 +302,19 @@ function renderJobProgress(jobId, home, away, date, market) {
   results.style.marginTop = '16px';
 
   card.append(header, log, results);
-  container.innerHTML = '';
   container.appendChild(card);
+
+  // Start elapsed timer
+  if (elapsedTimer) clearInterval(elapsedTimer);
+  const startTime = Date.now();
+  elapsedTimer = setInterval(() => {
+    const secs = Math.round((Date.now() - startTime) / 1000);
+    const el = document.getElementById('job-elapsed-' + jobId);
+    if (el) {
+      if (secs < 60) el.textContent = secs + 's';
+      else el.textContent = Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+    }
+  }, 1000);
 }
 
 function connectSSE(jobId) {
@@ -345,6 +377,12 @@ function updateJobStatus(jobId, status, message) {
     el.appendChild(document.createTextNode(' '));
   }
   el.appendChild(document.createTextNode(labels[status] || status));
+
+  // Stop elapsed timer on terminal states
+  if ((status === 'complete' || status === 'failed') && elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
 
   if (message) appendLog(jobId, message);
 }

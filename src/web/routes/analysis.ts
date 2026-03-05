@@ -32,6 +32,24 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Market must be one of: goals, corners, cards' };
     }
 
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      reply.status(400);
+      return { error: 'Date must be in ISO format (YYYY-MM-DD)' };
+    }
+
+    // Check for duplicate: same teams + date + market, still running
+    const existing = jobManager.getAll().find(
+      (j) =>
+        j.homeTeam === homeTeam &&
+        j.awayTeam === awayTeam &&
+        j.date === date &&
+        j.market === market &&
+        !['complete', 'failed'].includes(j.status)
+    );
+    if (existing) {
+      return { jobId: existing.id, status: existing.status, duplicate: true };
+    }
+
     const analyze = body.analyze !== false;
     const job = jobManager.create(homeTeam, awayTeam, date, market);
 

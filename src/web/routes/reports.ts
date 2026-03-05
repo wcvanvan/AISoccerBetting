@@ -72,50 +72,53 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
 
 /**
  * Extract value picks / recommended bets section from analysis markdown.
- * Looks for common section headers used in analysis prompts.
+ *
+ * Strategy:
+ * 1. Try to find the "Output" phase (Phase 4) which contains predictions, value picks,
+ *    bets to avoid, and caveats — all useful for the concise view.
+ * 2. Failing that, find a "Value Picks" or "Recommended Bets" heading and include
+ *    everything from there to the end (since these are typically near the end).
+ * 3. Fallback: return the last ~30% of the document.
  */
 function extractValuePicks(markdown: string): string {
   const lines = markdown.split('\n');
-  const patterns = [
-    /^#{1,3}\s*.*value\s*picks/i,
-    /^#{1,3}\s*.*recommended\s*(bets|plays|wagers)/i,
-    /^#{1,3}\s*.*top\s*picks/i,
-    /^#{1,3}\s*.*best\s*bets/i,
-    /^#{1,3}\s*.*final\s*recommendations/i,
-    /^#{1,3}\s*.*summary.*recommendations/i,
-    /^#{1,3}\s*.*betting\s*recommendations/i,
+
+  // Strategy 1: Find "Phase 4 -- Output" or similar output section
+  const outputIdx = lines.findIndex((l) =>
+    /^#{1,3}\s*(phase\s*4|output)/i.test(l)
+  );
+  if (outputIdx >= 0) {
+    // Include from output phase to end of document (it's the final phase)
+    return lines.slice(outputIdx).join('\n');
+  }
+
+  // Strategy 2: Find value picks / recommendations heading, include to EOF
+  const pickPatterns = [
+    /^#{1,4}\s*.*value\s*picks/i,
+    /^#{1,4}\s*.*recommended\s*(bets|plays|wagers)/i,
+    /^#{1,4}\s*.*top\s*picks/i,
+    /^#{1,4}\s*.*best\s*bets/i,
+    /^#{1,4}\s*.*final\s*recommendations/i,
+    /^#{1,4}\s*.*betting\s*recommendations/i,
+    /^#{1,4}\s*.*predictions/i,
   ];
 
-  let startIdx = -1;
-  let startLevel = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    for (const pattern of patterns) {
-      if (pattern.test(lines[i])) {
-        startIdx = i;
-        const match = lines[i].match(/^(#{1,3})/);
-        startLevel = match ? match[1].length : 2;
-        break;
+  for (const pattern of pickPatterns) {
+    const idx = lines.findIndex((l) => pattern.test(l));
+    if (idx >= 0) {
+      // Also look backwards for a "Predictions" or "Summary" heading that precedes picks
+      let startIdx = idx;
+      for (let i = idx - 1; i >= Math.max(0, idx - 30); i--) {
+        if (/^#{1,4}\s*(predictions|statistical\s*summary|summary)/i.test(lines[i])) {
+          startIdx = i;
+          break;
+        }
       }
-    }
-    if (startIdx >= 0) break;
-  }
-
-  if (startIdx < 0) {
-    // Fallback: return the last ~30% of the document (usually where recommendations are)
-    const cutoff = Math.max(0, Math.floor(lines.length * 0.7));
-    return lines.slice(cutoff).join('\n');
-  }
-
-  // Find the end of this section (next heading of same or higher level, or EOF)
-  let endIdx = lines.length;
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const headingMatch = lines[i].match(/^(#{1,3})\s/);
-    if (headingMatch && headingMatch[1].length <= startLevel) {
-      endIdx = i;
-      break;
+      return lines.slice(startIdx).join('\n');
     }
   }
 
-  return lines.slice(startIdx, endIdx).join('\n');
+  // Strategy 3: Fallback to last 30%
+  const cutoff = Math.max(0, Math.floor(lines.length * 0.7));
+  return lines.slice(cutoff).join('\n');
 }
