@@ -52,6 +52,14 @@ export class OddsApiClient {
     }
 
     const res = await fetch(url.toString());
+
+    // Log remaining API quota
+    const remaining = res.headers.get('x-requests-remaining');
+    const used = res.headers.get('x-requests-used');
+    if (remaining != null) {
+      console.error(`  [odds-api] ${remaining} requests remaining (${used ?? '?'} used)`);
+    }
+
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`The Odds API ${res.status} for ${path}: ${body}`);
