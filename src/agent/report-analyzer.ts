@@ -169,4 +169,3 @@ async function withTimeoutAndProgress<T>(
     console.error(`  Analysis completed in ${elapsed}s`);
   }
 }
-
