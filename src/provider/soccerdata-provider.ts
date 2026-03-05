@@ -37,6 +37,49 @@ export interface TeamSeasonStats {
   keyPassesPerMatch: number;
 }
 
+/** Per-referee card statistics */
+export interface RefereeProfile {
+  name: string;
+  games: number;
+  yellowsPerGame: number;
+  redsPerGame: number;
+  cardsPerGame: number;
+  foulsPerGame: number;
+  homeCardsPct: number;
+  leagues: string[];
+}
+
+/** Referee stats result including match referee (if known) and league average */
+export interface RefereeStats {
+  matchReferee?: RefereeProfile;
+  leagueAverage: {
+    games: number;
+    yellowsPerGame: number;
+    redsPerGame: number;
+    cardsPerGame: number;
+    foulsPerGame: number;
+  };
+  allReferees: RefereeProfile[];
+}
+
+/** League-level card context stats */
+export interface LeagueCardContext {
+  league: string;
+  matches: number;
+  avgCardsPerMatch: number;
+  avgYellowsPerMatch: number;
+  avgRedsPerMatch: number;
+  avgFoulsPerMatch: number;
+  avgHomeCards: number;
+  avgAwayCards: number;
+  over25CardsPct: number;
+  over35CardsPct: number;
+  over45CardsPct: number;
+  over55CardsPct: number;
+  over65CardsPct: number;
+  avgFoulsPerCard: number;
+}
+
 /** League-level context stats computed from Understat match data */
 export interface LeagueContext {
   league: string;
@@ -154,6 +197,70 @@ export class SoccerdataProvider implements DataProvider {
       over35Pct: Number(raw.over_3_5_pct) || 0,
       cleanSheetHomePct: Number(raw.clean_sheet_home_pct) || 0,
       cleanSheetAwayPct: Number(raw.clean_sheet_away_pct) || 0,
+    };
+  }
+
+  /**
+   * Fetch referee statistics from cached ESPN data.
+   * Returns the match referee (if known), league averages, and all referees with 3+ games.
+   */
+  async getRefereeStats(teamA: string, teamB: string): Promise<RefereeStats | null> {
+    const result = await this.call('get_referee_stats', { team_a: teamA, team_b: teamB });
+    if (result == null || typeof result !== 'object') return null;
+    const raw = result as Record<string, unknown>;
+
+    const toProfile = (p: Record<string, unknown>): RefereeProfile => ({
+      name: String(p.name ?? ''),
+      games: Number(p.games) || 0,
+      yellowsPerGame: Number(p.yellows_per_game) || 0,
+      redsPerGame: Number(p.reds_per_game) || 0,
+      cardsPerGame: Number(p.cards_per_game) || 0,
+      foulsPerGame: Number(p.fouls_per_game) || 0,
+      homeCardsPct: Number(p.home_cards_pct) || 50,
+      leagues: Array.isArray(p.leagues) ? p.leagues.map(String) : [],
+    });
+
+    const la = raw.league_average as Record<string, unknown> | undefined;
+    return {
+      matchReferee: raw.match_referee
+        ? toProfile(raw.match_referee as Record<string, unknown>)
+        : undefined,
+      leagueAverage: {
+        games: Number(la?.games) || 0,
+        yellowsPerGame: Number(la?.yellows_per_game) || 0,
+        redsPerGame: Number(la?.reds_per_game) || 0,
+        cardsPerGame: Number(la?.cards_per_game) || 0,
+        foulsPerGame: Number(la?.fouls_per_game) || 0,
+      },
+      allReferees: Array.isArray(raw.all_referees)
+        ? (raw.all_referees as Record<string, unknown>[]).map(toProfile)
+        : [],
+    };
+  }
+
+  /**
+   * Fetch league-level card context from cached ESPN data.
+   * Returns card averages, threshold frequencies, and fouls-per-card ratio.
+   */
+  async getLeagueCardContext(league: string): Promise<LeagueCardContext | null> {
+    const result = await this.call('get_league_card_context', { league });
+    if (result == null || typeof result !== 'object') return null;
+    const raw = result as Record<string, unknown>;
+    return {
+      league: String(raw.league ?? ''),
+      matches: Number(raw.matches) || 0,
+      avgCardsPerMatch: Number(raw.avg_cards_per_match) || 0,
+      avgYellowsPerMatch: Number(raw.avg_yellows_per_match) || 0,
+      avgRedsPerMatch: Number(raw.avg_reds_per_match) || 0,
+      avgFoulsPerMatch: Number(raw.avg_fouls_per_match) || 0,
+      avgHomeCards: Number(raw.avg_home_cards) || 0,
+      avgAwayCards: Number(raw.avg_away_cards) || 0,
+      over25CardsPct: Number(raw.over_2_5_cards_pct) || 0,
+      over35CardsPct: Number(raw.over_3_5_cards_pct) || 0,
+      over45CardsPct: Number(raw.over_4_5_cards_pct) || 0,
+      over55CardsPct: Number(raw.over_5_5_cards_pct) || 0,
+      over65CardsPct: Number(raw.over_6_5_cards_pct) || 0,
+      avgFoulsPerCard: Number(raw.avg_fouls_per_card) || 0,
     };
   }
 

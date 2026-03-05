@@ -16,7 +16,7 @@ import {
   SubbedOffPlayer,
 } from '../types';
 import { MatchOdds } from '../odds/types';
-import { TeamSeasonStats, LeagueContext } from '../provider/soccerdata-provider';
+import { TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext } from '../provider/soccerdata-provider';
 
 export interface FormatOptions {
   /** Show corner data in match lines (default: true) */
@@ -44,7 +44,9 @@ export class MarkdownFormatter {
     formatOptions?: Partial<FormatOptions>,
     teamA_season?: TeamSeasonStats,
     teamB_season?: TeamSeasonStats,
-    leagueContext?: LeagueContext
+    leagueContext?: LeagueContext,
+    refereeStats?: RefereeStats,
+    leagueCardContext?: LeagueCardContext
   ): string {
     const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
     const isGoalMode = opts.oddsLabel === 'Goal';
@@ -88,6 +90,31 @@ export class MarkdownFormatter {
       if (teamB_matches.length > 0) {
         s.push(`### ${teamB_name} (Away filter)\n`);
         s.push(this.formatGoalSummary(teamB_matches, 'A'));
+      }
+    }
+
+    // Referee stats (card mode only)
+    if (isCardMode && refereeStats) {
+      s.push(`## Referee Stats\n`);
+      s.push(this.formatRefereeStats(refereeStats));
+    }
+
+    // League card context (card mode only)
+    if (isCardMode && leagueCardContext) {
+      s.push(`## League Card Context\n`);
+      s.push(this.formatLeagueCardContext(leagueCardContext));
+    }
+
+    // Pre-computed card stats summary (card mode only)
+    if (isCardMode && (teamA_matches.length > 0 || teamB_matches.length > 0)) {
+      s.push(`## Pre-computed Card Stats\n`);
+      if (teamA_matches.length > 0) {
+        s.push(`### ${teamA_name} (Home filter)\n`);
+        s.push(this.formatCardSummary(teamA_matches, 'H'));
+      }
+      if (teamB_matches.length > 0) {
+        s.push(`### ${teamB_name} (Away filter)\n`);
+        s.push(this.formatCardSummary(teamB_matches, 'A'));
       }
     }
 
@@ -139,12 +166,15 @@ export class MarkdownFormatter {
 
       // Card-mode stats inline (prefer event counts over boxscore when boxscore is 0)
       if (isCardMode) {
-        line1 += this.formatCardStatsInline(m.stats, m.opponent_stats, m.card_events, m.opponent_card_events);
+        line1 += this.formatCardStatsInline(m.stats, m.opponent_stats, m.card_events, m.opponent_card_events, m.extras);
       }
 
-      // Render extras if present (skip metrics already shown inline in goal mode)
-      if (m.extras && Object.keys(m.extras).length > 0) {
-        const skip = isGoalMode ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep']) : undefined;
+      // Render extras if present (skip metrics already shown inline or irrelevant)
+      // Card mode: skip all extras — YC/RC/fouls/tackles/interceptions already inline
+      if (!isCardMode && m.extras && Object.keys(m.extras).length > 0) {
+        const skip = isGoalMode
+          ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep'])
+          : undefined;
         const extrasStr = this.formatExtras(m.extras, skip);
         if (extrasStr) line1 += ` · ${extrasStr}`;
       }
@@ -264,6 +294,7 @@ export class MarkdownFormatter {
     oppStats: MatchStats | null | undefined,
     teamCards?: CardEvent[],
     oppCards?: CardEvent[],
+    extras?: Record<string, string | number | null>,
   ): string {
     const parts: string[] = [];
 
@@ -293,6 +324,22 @@ export class MarkdownFormatter {
     const flO = oppStats?.fouls;
     if (fl != null && fl > 0) {
       parts.push(flO != null ? `Fouls ${fl}-${flO}` : `Fouls ${fl}`);
+    }
+
+    // Tackles and interceptions from extras (card-relevant)
+    if (extras) {
+      const tkl = extras.tackles;
+      const oppTkl = extras.oppTackles;
+      if (tkl != null && typeof tkl === 'number') {
+        parts.push(oppTkl != null && typeof oppTkl === 'number'
+          ? `Tkl ${tkl}-${oppTkl}` : `Tkl ${tkl}`);
+      }
+      const inter = extras.interceptions;
+      const oppInter = extras.oppInterceptions;
+      if (inter != null && typeof inter === 'number') {
+        parts.push(oppInter != null && typeof oppInter === 'number'
+          ? `Int ${inter}-${oppInter}` : `Int ${inter}`);
+      }
     }
 
     return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
@@ -471,6 +518,216 @@ export class MarkdownFormatter {
     return parseInt(m[1], 10);
   }
 
+  // ── Pre-computed Card Stats ───────────────────────────────────────────────
+
+  private formatCardSummary(matches: MatchDetails[], venueFilter: 'H' | 'A'): string {
+    const lines: string[] = [];
+    const all = matches;
+    const venue = matches.filter(m => m.venue === venueFilter);
+
+    const countYellow = (events?: CardEvent[]) =>
+      (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
+    const countRed = (events?: CardEvent[]) =>
+      (events ?? []).filter(c => c.card_type === 'red' || c.card_type === 'second_yellow').length;
+
+    const computeStats = (ms: MatchDetails[], label: string) => {
+      const n = ms.length;
+      if (n === 0) return;
+
+      const teamYC = ms.map(m => {
+        const boxYC = m.stats?.yellow_cards ?? 0;
+        return boxYC > 0 ? boxYC : countYellow(m.card_events);
+      });
+      const oppYC = ms.map(m => {
+        const boxYC = m.opponent_stats?.yellow_cards ?? 0;
+        return boxYC > 0 ? boxYC : countYellow(m.opponent_card_events);
+      });
+      const teamRC = ms.map(m => {
+        const boxRC = m.stats?.red_cards ?? 0;
+        return boxRC > 0 ? boxRC : countRed(m.card_events);
+      });
+      const oppRC = ms.map(m => {
+        const boxRC = m.opponent_stats?.red_cards ?? 0;
+        return boxRC > 0 ? boxRC : countRed(m.opponent_card_events);
+      });
+      const teamCards = teamYC.map((yc, i) => yc + teamRC[i]);
+      const oppCards = oppYC.map((yc, i) => yc + oppRC[i]);
+      const totalCards = teamCards.map((tc, i) => tc + oppCards[i]);
+      const teamFouls = ms.map(m => m.stats?.fouls ?? 0);
+      const oppFouls = ms.map(m => m.opponent_stats?.fouls ?? 0);
+      const totalFouls = teamFouls.map((f, i) => f + oppFouls[i]);
+
+      const avg = (arr: number[]) => (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
+      const pct = (arr: number[], cond: (v: number) => boolean) =>
+        ((arr.filter(cond).length / arr.length) * 100).toFixed(1);
+
+      lines.push(`${label} (n=${n}):`);
+      lines.push(`- Team cards: avg ${avg(teamCards)} (YC ${avg(teamYC)}, RC ${avg(teamRC)})`);
+      lines.push(`- Opp cards: avg ${avg(oppCards)} (YC ${avg(oppYC)}, RC ${avg(oppRC)})`);
+      lines.push(`- Total match cards: avg ${avg(totalCards)}`);
+      lines.push(`- Team fouls: avg ${avg(teamFouls)} · Opp fouls: avg ${avg(oppFouls)} · Total: avg ${avg(totalFouls)}`);
+
+      // Fouls-per-card ratio
+      const totalTeamCards = teamCards.reduce((a, b) => a + b, 0);
+      const totalTeamFouls = teamFouls.reduce((a, b) => a + b, 0);
+      if (totalTeamCards > 0) {
+        lines.push(`- Team fouls-per-card ratio: ${(totalTeamFouls / totalTeamCards).toFixed(2)}`);
+      }
+
+      // Tackles and interceptions from extras
+      const teamTackles = ms.map(m => {
+        const t = m.extras?.tackles;
+        return (t != null && typeof t === 'number') ? t : 0;
+      });
+      const oppTackles = ms.map(m => {
+        const t = m.extras?.oppTackles;
+        return (t != null && typeof t === 'number') ? t : 0;
+      });
+      const teamInter = ms.map(m => {
+        const t = m.extras?.interceptions;
+        return (t != null && typeof t === 'number') ? t : 0;
+      });
+      const hasTackles = teamTackles.some(t => t > 0) || oppTackles.some(t => t > 0);
+      if (hasTackles) {
+        lines.push(`- Team tackles: avg ${avg(teamTackles)} · Opp tackles: avg ${avg(oppTackles)}`);
+        if (teamInter.some(t => t > 0)) {
+          lines.push(`- Team interceptions: avg ${avg(teamInter)}`);
+        }
+      }
+
+      // Booking points (10 per yellow, 25 per red)
+      const teamBP = teamYC.map((yc, i) => yc * 10 + teamRC[i] * 25);
+      const oppBP = oppYC.map((yc, i) => yc * 10 + oppRC[i] * 25);
+      const totalBP = teamBP.map((bp, i) => bp + oppBP[i]);
+      lines.push(`- Booking points: team avg ${avg(teamBP)}, opp avg ${avg(oppBP)}, total avg ${avg(totalBP)}`);
+
+      // Threshold frequencies
+      lines.push(`- Over 2.5 cards: ${pct(totalCards, v => v > 2.5)}%` +
+        ` · Over 3.5: ${pct(totalCards, v => v > 3.5)}%` +
+        ` · Over 4.5: ${pct(totalCards, v => v > 4.5)}%` +
+        ` · Over 5.5: ${pct(totalCards, v => v > 5.5)}%` +
+        ` · Over 6.5: ${pct(totalCards, v => v > 6.5)}%`);
+    };
+
+    computeStats(venue, venueFilter === 'H' ? 'Home games' : 'Away games');
+    computeStats(all, 'All games');
+
+    // Card timing distribution
+    const allCardMinutes: number[] = [];
+    const allOppCardMinutes: number[] = [];
+    for (const m of all) {
+      for (const c of m.card_events) {
+        const min = this.parseMinute(c.minute);
+        if (min != null) allCardMinutes.push(min);
+      }
+      for (const c of m.opponent_card_events) {
+        const min = this.parseMinute(c.minute);
+        if (min != null) allOppCardMinutes.push(min);
+      }
+    }
+
+    if (allCardMinutes.length > 0 || allOppCardMinutes.length > 0) {
+      const bin = (minutes: number[]) => {
+        const total = minutes.length;
+        if (total === 0) return 'none';
+        const bins = [
+          { label: '1-15', count: minutes.filter(m => m >= 1 && m <= 15).length },
+          { label: '16-30', count: minutes.filter(m => m >= 16 && m <= 30).length },
+          { label: '31-HT', count: minutes.filter(m => m >= 31 && m <= 45).length },
+          { label: '46-60', count: minutes.filter(m => m >= 46 && m <= 60).length },
+          { label: '61-75', count: minutes.filter(m => m >= 61 && m <= 75).length },
+          { label: '76-FT', count: minutes.filter(m => m >= 76).length },
+        ];
+        return bins.map(b => `${b.label}: ${b.count} (${((b.count / total) * 100).toFixed(0)}%)`).join(', ');
+      };
+
+      lines.push('Card timing (all games):');
+      if (allCardMinutes.length > 0) {
+        lines.push(`- Team (${allCardMinutes.length}): ${bin(allCardMinutes)}`);
+      }
+      if (allOppCardMinutes.length > 0) {
+        lines.push(`- Opponent (${allOppCardMinutes.length}): ${bin(allOppCardMinutes)}`);
+      }
+
+      // 1H vs 2H split
+      const firstHalf = allCardMinutes.filter(m => m <= 45).length + allOppCardMinutes.filter(m => m <= 45).length;
+      const secondHalf = allCardMinutes.filter(m => m > 45).length + allOppCardMinutes.filter(m => m > 45).length;
+      const totalTimed = firstHalf + secondHalf;
+      if (totalTimed > 0) {
+        lines.push(`- 1H vs 2H split: ${firstHalf} (${((firstHalf / totalTimed) * 100).toFixed(0)}%) vs ${secondHalf} (${((secondHalf / totalTimed) * 100).toFixed(0)}%)`);
+      }
+    }
+
+    // Player card frequency (repeat offenders)
+    const playerCards: Record<string, number> = {};
+    for (const m of all) {
+      for (const c of m.card_events) {
+        if (c.player) {
+          playerCards[c.player] = (playerCards[c.player] || 0) + 1;
+        }
+      }
+    }
+    const repeatOffenders = Object.entries(playerCards)
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1]);
+    if (repeatOffenders.length > 0) {
+      lines.push('Repeat offenders (2+ cards in 20 games):');
+      for (const [player, count] of repeatOffenders) {
+        lines.push(`- ${player}: ${count} cards`);
+      }
+    }
+
+    return lines.join('\n') + '\n';
+  }
+
+  // ── Referee Stats ─────────────────────────────────────────────────────
+
+  private formatRefereeStats(stats: RefereeStats): string {
+    const lines: string[] = [];
+
+    if (stats.matchReferee) {
+      const r = stats.matchReferee;
+      lines.push(`**Match Referee: ${r.name}** (${r.games} games in database)`);
+      lines.push(`- Cards/game: ${r.cardsPerGame} (YC ${r.yellowsPerGame}, RC ${r.redsPerGame})`);
+      lines.push(`- Fouls/game: ${r.foulsPerGame}`);
+      lines.push(`- Home cards %: ${r.homeCardsPct}%`);
+      if (r.leagues.length > 0) {
+        lines.push(`- Leagues: ${r.leagues.join(', ')}`);
+      }
+    } else {
+      lines.push('**Match Referee: Not yet assigned / unknown**');
+      lines.push('Note: referee assignment is typically confirmed 2-3 days before the match.');
+    }
+
+    const la = stats.leagueAverage;
+    lines.push('');
+    lines.push(`**League Average** (${la.games} games):`);
+    lines.push(`- Cards/game: ${la.cardsPerGame} (YC ${la.yellowsPerGame}, RC ${la.redsPerGame})`);
+    lines.push(`- Fouls/game: ${la.foulsPerGame}`);
+
+    if (stats.matchReferee && la.cardsPerGame > 0) {
+      const delta = stats.matchReferee.cardsPerGame - la.cardsPerGame;
+      const pctDelta = ((delta / la.cardsPerGame) * 100).toFixed(1);
+      const dir = delta > 0 ? 'ABOVE' : delta < 0 ? 'BELOW' : 'AT';
+      lines.push(`- **Referee vs league: ${delta > 0 ? '+' : ''}${delta.toFixed(2)} cards/game (${pctDelta}% ${dir} average)**`);
+    }
+
+    return lines.join('\n') + '\n';
+  }
+
+  // ── League Card Context ───────────────────────────────────────────────
+
+  private formatLeagueCardContext(ctx: LeagueCardContext): string {
+    const lines: string[] = [];
+    lines.push(`Based on ${ctx.matches} ${ctx.league} matches this season:`);
+    lines.push(`- Cards/match: ${ctx.avgCardsPerMatch} (YC ${ctx.avgYellowsPerMatch}, RC ${ctx.avgRedsPerMatch})`);
+    lines.push(`- Home cards: ${ctx.avgHomeCards} · Away cards: ${ctx.avgAwayCards}`);
+    lines.push(`- Fouls/match: ${ctx.avgFoulsPerMatch}`);
+    lines.push(`- Fouls per card: ${ctx.avgFoulsPerCard}`);
+    lines.push(`- Over 2.5 cards: ${ctx.over25CardsPct}% · Over 3.5: ${ctx.over35CardsPct}% · Over 4.5: ${ctx.over45CardsPct}% · Over 5.5: ${ctx.over55CardsPct}% · Over 6.5: ${ctx.over65CardsPct}%`);
+    return lines.join('\n') + '\n';
+  }
+
   // ── H2H ───────────────────────────────────────────────────────────────────
 
   private formatH2H(matches: H2HMatch[], teamA: string, teamB: string, opts: FormatOptions): string {
@@ -501,15 +758,17 @@ export class MarkdownFormatter {
         header += this.formatH2HCardStats(m, teamA, teamB);
       }
 
-      // Render extras if present (skip metrics already shown inline in goal mode)
-      const skipKeys = isGoalMode ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep']) : undefined;
-      if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
-        const s = this.formatExtras(m.teamA_extras, skipKeys);
-        if (s) header += ` · ${teamA}: ${s}`;
-      }
-      if (m.teamB_extras && Object.keys(m.teamB_extras).length > 0) {
-        const s = this.formatExtras(m.teamB_extras, skipKeys);
-        if (s) header += ` · ${teamB}: ${s}`;
+      // Render extras if present (skip in card mode — noise; skip inline metrics in goal mode)
+      if (!isCardMode) {
+        const skipKeys = isGoalMode ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep']) : undefined;
+        if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
+          const s = this.formatExtras(m.teamA_extras, skipKeys);
+          if (s) header += ` · ${teamA}: ${s}`;
+        }
+        if (m.teamB_extras && Object.keys(m.teamB_extras).length > 0) {
+          const s = this.formatExtras(m.teamB_extras, skipKeys);
+          if (s) header += ` · ${teamB}: ${s}`;
+        }
       }
 
       const lineA = `${teamA} (${m.teamA_formation ?? '-'}): ${this.formatLineup(m.teamA_lineup, m.teamA_starters_subbed_off, m.teamA_substitutes)}`;
@@ -626,6 +885,12 @@ export class MarkdownFormatter {
     oppCrosses: 'oppCross',
     crossesAcc: 'CrossAcc',
     oppCrossesAcc: 'oppCrossAcc',
+    tackles: 'Tkl',
+    oppTackles: 'oppTkl',
+    tacklesWon: 'TklW',
+    oppTacklesWon: 'oppTklW',
+    interceptions: 'Int',
+    oppInterceptions: 'oppInt',
     possession: 'Poss',
     saves: 'Saves',
     shots: 'Shots',

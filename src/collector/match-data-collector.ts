@@ -6,7 +6,7 @@
  */
 
 import { DataProvider } from '../provider/data-provider';
-import { SoccerdataProvider, TeamSeasonStats, LeagueContext } from '../provider/soccerdata-provider';
+import { SoccerdataProvider, TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext } from '../provider/soccerdata-provider';
 import { MarkdownFormatter, FormatOptions } from '../formatter';
 import { MatchDetails, H2HMatch } from '../types';
 import { OddsCollector, MarketConfig, CORNER_MARKET_CONFIG } from '../odds';
@@ -87,7 +87,9 @@ export class MatchDataCollector {
       odds?: MatchOdds,
       teamA_season?: TeamSeasonStats | null,
       teamB_season?: TeamSeasonStats | null,
-      leagueContext?: LeagueContext | null
+      leagueContext?: LeagueContext | null,
+      refereeStats?: RefereeStats | null,
+      leagueCardContext?: LeagueCardContext | null
     ): string =>
       this.markdownFormatter.format_output(
         normalizedInput.teamA_name,
@@ -102,18 +104,23 @@ export class MatchDataCollector {
         this.formatOptions,
         teamA_season ?? undefined,
         teamB_season ?? undefined,
-        leagueContext ?? undefined
+        leagueContext ?? undefined,
+        refereeStats ?? undefined,
+        leagueCardContext ?? undefined
       );
 
     try {
       const teamA_id = await this.resolveTeamID(normalizedInput.teamA_name, 'Team A');
       const teamB_id = await this.resolveTeamID(normalizedInput.teamB_name, 'Team B');
 
-      // Determine if we should fetch season stats (only for goal mode with soccerdata provider)
+      // Determine which enrichment data to fetch based on mode
       const isGoalMode = this.formatOptions?.oddsLabel === 'Goal';
-      const canFetchSeasonStats = isGoalMode && this.provider instanceof SoccerdataProvider;
+      const isCardMode = this.formatOptions?.oddsLabel === 'Card';
+      const isSoccerdata = this.provider instanceof SoccerdataProvider;
+      const canFetchSeasonStats = isGoalMode && isSoccerdata;
+      const canFetchCardContext = isCardMode && isSoccerdata;
 
-      const [teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext] = await Promise.all([
+      const [teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext] = await Promise.all([
         this.collectTeamMatches(teamA_id, normalizedInput.teamA_name),
         this.collectTeamMatches(teamB_id, normalizedInput.teamB_name),
         this.collectH2HMatches(
@@ -138,9 +145,15 @@ export class MatchDataCollector {
         canFetchSeasonStats
           ? (this.provider as SoccerdataProvider).getLeagueContext(normalizedInput.teamA_name).catch(() => null)
           : Promise.resolve(null),
+        canFetchCardContext
+          ? (this.provider as SoccerdataProvider).getRefereeStats(normalizedInput.teamA_name, normalizedInput.teamB_name).catch(() => null)
+          : Promise.resolve(null),
+        canFetchCardContext
+          ? (this.provider as SoccerdataProvider).getLeagueCardContext(normalizedInput.teamA_name).catch(() => null)
+          : Promise.resolve(null),
       ]);
 
-      return format(teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext);
+      return format(teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);

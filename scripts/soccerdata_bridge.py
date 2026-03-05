@@ -652,6 +652,9 @@ class DataAssembler:
             "penaltyKickShots": "penKickShots",
             "totalCrosses": "crosses",
             "accurateCrosses": "crossesAcc",
+            "totalTackles": "tackles",
+            "effectiveTackles": "tacklesWon",
+            "interceptions": "interceptions",
         }
         extras: dict[str, Any] = {}
         for stat in team_data.get("statistics", []):
@@ -1179,6 +1182,268 @@ class DataAssembler:
 
         return h2h_matches
 
+    # ── Referee & league card stats from ESPN cache ─────────────────────
+
+    def get_referee_stats(self, team_a: str, team_b: str) -> dict[str, Any] | None:
+        """Compute referee card averages from all cached ESPN summaries.
+
+        Scans every Summary_*.json to build a per-referee profile:
+        - cards_per_game (yellows + reds)
+        - yellows_per_game, reds_per_game
+        - fouls_per_game
+        - home_cards_pct (fraction of cards given to home team)
+        - games (sample size)
+
+        If the upcoming match has a known referee (via schedule), returns that
+        referee's stats plus a league average for comparison.
+        """
+        espn = self._get_espn()
+        cache_dir = espn.data_dir
+        from collections import defaultdict
+
+        ref_data: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"games": 0, "yellows": 0, "reds": 0, "fouls": 0,
+                     "home_yellows": 0, "away_yellows": 0, "leagues": set()}
+        )
+
+        for path in cache_dir.glob("Summary_*.json"):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+
+            officials = data.get("gameInfo", {}).get("officials", [])
+            if not officials:
+                continue
+            ref_name = officials[0].get("displayName", "")
+            if not ref_name:
+                continue
+
+            teams = data.get("boxscore", {}).get("teams", [])
+            form = data.get("boxscore", {}).get("form", [])
+            yellows = [0, 0]  # home, away
+            reds = [0, 0]
+            fouls = [0, 0]
+            for i, td in enumerate(teams):
+                for stat in td.get("statistics", []):
+                    name = stat.get("name", "")
+                    val = stat.get("displayValue", "0")
+                    try:
+                        if name == "yellowCards":
+                            yellows[i] = int(val)
+                        elif name == "redCards":
+                            reds[i] = int(val)
+                        elif name == "foulsCommitted":
+                            fouls[i] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+
+            # Determine league from header
+            league = ""
+            header = data.get("header", {})
+            hl = header.get("league", {})
+            if hl:
+                league = hl.get("name", "") or hl.get("slug", "")
+
+            rd = ref_data[ref_name]
+            rd["games"] += 1
+            rd["yellows"] += sum(yellows)
+            rd["reds"] += sum(reds)
+            rd["fouls"] += sum(fouls)
+            rd["home_yellows"] += yellows[0]
+            rd["away_yellows"] += yellows[1]
+            if league:
+                rd["leagues"].add(league)
+
+        if not ref_data:
+            return None
+
+        # Build per-referee stats
+        def _ref_profile(name: str, rd: dict) -> dict[str, Any]:
+            g = rd["games"]
+            total_cards = rd["yellows"] + rd["reds"]
+            home_yc = rd["home_yellows"]
+            away_yc = rd["away_yellows"]
+            return {
+                "name": name,
+                "games": g,
+                "yellows_per_game": round(rd["yellows"] / g, 2),
+                "reds_per_game": round(rd["reds"] / g, 2),
+                "cards_per_game": round(total_cards / g, 2),
+                "fouls_per_game": round(rd["fouls"] / g, 1),
+                "home_cards_pct": round(home_yc / (home_yc + away_yc) * 100, 1) if (home_yc + away_yc) > 0 else 50.0,
+                "leagues": sorted(rd["leagues"]),
+            }
+
+        # Compute league average
+        total_games = sum(rd["games"] for rd in ref_data.values())
+        total_yellows = sum(rd["yellows"] for rd in ref_data.values())
+        total_reds = sum(rd["reds"] for rd in ref_data.values())
+        total_fouls = sum(rd["fouls"] for rd in ref_data.values())
+        league_avg = {
+            "games": total_games,
+            "yellows_per_game": round(total_yellows / total_games, 2) if total_games else 0,
+            "reds_per_game": round(total_reds / total_games, 2) if total_games else 0,
+            "cards_per_game": round((total_yellows + total_reds) / total_games, 2) if total_games else 0,
+            "fouls_per_game": round(total_fouls / total_games, 1) if total_games else 0,
+        }
+
+        # Try to find match referee: look for upcoming/recent match between teams
+        match_ref = None
+        schedule = self._get_schedule()
+        if schedule is not None and not schedule.empty:
+            sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
+            norm_a = team_a.lower()
+            norm_b = team_b.lower()
+            for _, row in sched.iterrows():
+                home = str(row.get("home_team", "")).lower()
+                away = str(row.get("away_team", "")).lower()
+                a_match = norm_a in home or home in norm_a or norm_a in away or away in norm_a
+                b_match = norm_b in home or home in norm_b or norm_b in away or away in norm_b
+                if a_match and b_match:
+                    gid = row.get("game_id")
+                    if gid and int(gid) in {int(p.stem.split("_")[1]) for p in cache_dir.glob("Summary_*.json") if "_" in p.stem}:
+                        try:
+                            with open(cache_dir / f"Summary_{int(gid)}.json") as f:
+                                summ = json.load(f)
+                            officials = summ.get("gameInfo", {}).get("officials", [])
+                            if officials:
+                                match_ref = officials[0].get("displayName", "")
+                        except Exception:
+                            pass
+
+        result: dict[str, Any] = {
+            "league_average": league_avg,
+            "all_referees": [
+                _ref_profile(name, rd)
+                for name, rd in sorted(ref_data.items(), key=lambda x: -x[1]["games"])
+                if rd["games"] >= 3
+            ],
+        }
+
+        if match_ref and match_ref in ref_data:
+            result["match_referee"] = _ref_profile(match_ref, ref_data[match_ref])
+
+        return result
+
+    def get_league_card_context(self, league: str) -> dict[str, Any] | None:
+        """Compute league-level card baselines from cached ESPN summaries.
+
+        Returns average cards, fouls, and threshold frequencies for the league.
+        """
+        espn = self._get_espn()
+        cache_dir = espn.data_dir
+
+        # Resolve league if team name was passed
+        target_league = None
+        schedule = self._get_schedule()
+        if schedule is not None and not schedule.empty:
+            sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
+            # Check if it's a direct league name
+            leagues_in_data = sched["league"].unique()
+            for ln in leagues_in_data:
+                if self._fuzzy_team_match(league, str(ln)):
+                    target_league = str(ln)
+                    break
+            # If not, resolve as team name — pick league with most matches
+            if not target_league:
+                team_rows = sched[
+                    sched["home_team"].apply(lambda t: self._fuzzy_team_match(league, str(t)))
+                    | sched["away_team"].apply(lambda t: self._fuzzy_team_match(league, str(t)))
+                ]
+                if not team_rows.empty:
+                    league_counts = team_rows["league"].value_counts()
+                    target_league = str(league_counts.index[0])
+
+        if not target_league:
+            target_league = "ENG-Premier League"
+
+        # Collect card data from all cached summaries in this league
+        game_ids = set()
+        if schedule is not None and not schedule.empty:
+            sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
+            league_rows = sched[sched["league"].apply(lambda l: self._fuzzy_team_match(target_league, str(l)))]
+            game_ids = set(int(gid) for gid in league_rows["game_id"].dropna())
+
+        total_yellows = []
+        total_reds = []
+        total_fouls = []
+        total_cards = []
+        home_cards_list = []
+        away_cards_list = []
+
+        for path in cache_dir.glob("Summary_*.json"):
+            try:
+                gid = int(path.stem.split("_")[1])
+            except (IndexError, ValueError):
+                continue
+            if game_ids and gid not in game_ids:
+                continue
+
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+
+            teams = data.get("boxscore", {}).get("teams", [])
+            if len(teams) < 2:
+                continue
+
+            yellows = [0, 0]
+            reds = [0, 0]
+            fouls = [0, 0]
+            for i, td in enumerate(teams):
+                for stat in td.get("statistics", []):
+                    name = stat.get("name", "")
+                    val = stat.get("displayValue", "0")
+                    try:
+                        if name == "yellowCards":
+                            yellows[i] = int(val)
+                        elif name == "redCards":
+                            reds[i] = int(val)
+                        elif name == "foulsCommitted":
+                            fouls[i] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+
+            match_yc = sum(yellows)
+            match_rc = sum(reds)
+            match_cards = match_yc + match_rc
+            match_fouls = sum(fouls)
+
+            total_yellows.append(match_yc)
+            total_reds.append(match_rc)
+            total_cards.append(match_cards)
+            total_fouls.append(match_fouls)
+            home_cards_list.append(yellows[0] + reds[0])
+            away_cards_list.append(yellows[1] + reds[1])
+
+        n = len(total_cards)
+        if n == 0:
+            return None
+
+        avg_cards = sum(total_cards) / n
+        avg_fouls = sum(total_fouls) / n
+
+        return {
+            "league": target_league,
+            "matches": n,
+            "avg_cards_per_match": round(avg_cards, 2),
+            "avg_yellows_per_match": round(sum(total_yellows) / n, 2),
+            "avg_reds_per_match": round(sum(total_reds) / n, 2),
+            "avg_fouls_per_match": round(avg_fouls, 1),
+            "avg_home_cards": round(sum(home_cards_list) / n, 2),
+            "avg_away_cards": round(sum(away_cards_list) / n, 2),
+            "over_2_5_cards_pct": round(sum(1 for c in total_cards if c > 2.5) / n * 100, 1),
+            "over_3_5_cards_pct": round(sum(1 for c in total_cards if c > 3.5) / n * 100, 1),
+            "over_4_5_cards_pct": round(sum(1 for c in total_cards if c > 4.5) / n * 100, 1),
+            "over_5_5_cards_pct": round(sum(1 for c in total_cards if c > 5.5) / n * 100, 1),
+            "over_6_5_cards_pct": round(sum(1 for c in total_cards if c > 6.5) / n * 100, 1),
+            "avg_fouls_per_card": round(avg_fouls / avg_cards, 2) if avg_cards > 0 else 0,
+        }
+
     # ── Team season stats from Understat ─────────────────────────────────
 
     def get_team_season_stats(self, team: str) -> dict[str, Any] | None:
@@ -1355,6 +1620,15 @@ def handle_request(assembler: DataAssembler, req: dict[str, Any]) -> Any:
 
     if method == "get_league_context":
         return assembler.get_league_context(league=params["league"])
+
+    if method == "get_referee_stats":
+        return assembler.get_referee_stats(
+            team_a=params["team_a"],
+            team_b=params["team_b"],
+        )
+
+    if method == "get_league_card_context":
+        return assembler.get_league_card_context(league=params["league"])
 
     raise ValueError(f"Unknown method: {method}")
 
