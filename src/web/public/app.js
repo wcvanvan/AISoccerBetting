@@ -128,7 +128,7 @@ function renderEvents(events) {
     const date = document.getElementById('custom-date').value.trim();
     const market = document.getElementById('custom-market').value;
     if (!home || !away || !date) { alert('Fill in all fields'); return; }
-    startJob(home, away, date, market, true);
+    launchWithCacheCheck(home, away, date, market, true);
   });
   document.getElementById('custom-collect').addEventListener('click', () => {
     const home = document.getElementById('custom-home').value.trim();
@@ -136,7 +136,7 @@ function renderEvents(events) {
     const date = document.getElementById('custom-date').value.trim();
     const market = document.getElementById('custom-market').value;
     if (!home || !away || !date) { alert('Fill in all fields'); return; }
-    startJob(home, away, date, market, false);
+    launchWithCacheCheck(home, away, date, market, false);
   });
 
   // Events table
@@ -204,7 +204,7 @@ function renderEvents(events) {
     btnAnalyze.textContent = 'Analyze';
     btnAnalyze.addEventListener('click', () => {
       const market = select.value;
-      startJob(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, true, btnAnalyze);
+      launchWithCacheCheck(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, true, btnAnalyze);
     });
 
     const btnCollect = document.createElement('button');
@@ -213,7 +213,7 @@ function renderEvents(events) {
     btnCollect.style.marginLeft = '6px';
     btnCollect.addEventListener('click', () => {
       const market = select.value;
-      startJob(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, false, btnCollect);
+      launchWithCacheCheck(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, false, btnCollect);
     });
 
     tdActions.append(btnAnalyze, btnCollect);
@@ -227,7 +227,12 @@ function renderEvents(events) {
 
 // ── Analysis ────────────────────────────────────────────────────────────────
 
-async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
+function launchWithCacheCheck(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
+  // First attempt without force — server returns cached results if available
+  startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn, false);
+}
+
+async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn, force) {
   if (triggerBtn) {
     triggerBtn.disabled = true;
     triggerBtn.classList.add('loading');
@@ -236,12 +241,25 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
     const resp = await fetch('/api/analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze }),
+      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze, force: !!force }),
     });
     const data = await resp.json();
 
     if (data.error) {
       alert('Error: ' + data.error);
+      return;
+    }
+
+    currentJobParams = { homeTeam, awayTeam, date, market };
+
+    // Cached results found on disk — show them immediately
+    if (data.cached) {
+      currentJobId = data.jobId;
+      showPage('results');
+      renderJobProgress(data.jobId, homeTeam, awayTeam, date, market, true, true);
+      appendLog(data.jobId, 'Loaded from cached results');
+      updateJobStatus(data.jobId, 'complete', null);
+      renderResults(data.jobId);
       return;
     }
 
@@ -266,21 +284,40 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
 
 let elapsedTimer = null;
 let tabCache = {}; // Cache loaded tab HTML by jobId:tabKey
+let currentJobParams = null; // { homeTeam, awayTeam, date, market } for re-run
 
-function renderJobProgress(jobId, home, away, date, market, skipTimer) {
+function renderJobProgress(jobId, home, away, date, market, skipTimer, isCached) {
   const container = document.getElementById('results-container');
   const marketLabel = market.charAt(0).toUpperCase() + market.slice(1);
 
   container.innerHTML = '';
   tabCache = {};
 
-  // Back link
+  // Top bar: back link + re-run button
+  const topBar = document.createElement('div');
+  topBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
+
   const backLink = document.createElement('a');
   backLink.href = '#';
-  backLink.style.cssText = 'font-size: 13px; color: var(--text-dim); text-decoration: none; display: inline-block; margin-bottom: 12px;';
+  backLink.style.cssText = 'font-size: 13px; color: var(--text-dim); text-decoration: none;';
   backLink.textContent = '\u2190 Back to matches';
   backLink.addEventListener('click', (e) => { e.preventDefault(); showPage('matches'); });
-  container.appendChild(backLink);
+  topBar.appendChild(backLink);
+
+  if (isCached) {
+    const rerunBtn = document.createElement('button');
+    rerunBtn.className = 'btn btn-secondary btn-sm';
+    rerunBtn.textContent = 'Re-run Pipeline';
+    rerunBtn.addEventListener('click', () => {
+      if (!currentJobParams) return;
+      if (!confirm('Cached results already exist for this match.\n\nRe-run the full pipeline? This will overwrite existing results.')) return;
+      const p = currentJobParams;
+      startJob(p.homeTeam, p.awayTeam, p.date, p.market, true, rerunBtn, true);
+    });
+    topBar.appendChild(rerunBtn);
+  }
+
+  container.appendChild(topBar);
 
   const card = document.createElement('div');
   card.className = 'job-card';
@@ -597,8 +634,10 @@ async function viewJob(jobId) {
     }
 
     currentJobId = jobId;
+    currentJobParams = { homeTeam: job.homeTeam, awayTeam: job.awayTeam, date: job.date, market: job.market };
     showPage('results');
-    renderJobProgress(jobId, job.homeTeam, job.awayTeam, job.date, job.market, true);
+    const isCached = job.status === 'complete';
+    renderJobProgress(jobId, job.homeTeam, job.awayTeam, job.date, job.market, true, isCached);
 
     // Replay logs
     (job.logs || []).forEach((log) => appendLog(jobId, log.message));

@@ -63,6 +63,35 @@ function buildReportFilename(
   return `${slug(teamA)}-vs-${slug(teamB)}-${date}-${toolName}.md`;
 }
 
+/** Check if cached report/analysis files exist on disk for a given match+market. */
+export function getCachedPaths(
+  homeTeam: string,
+  awayTeam: string,
+  date: string,
+  market: MarketType
+): { reportPath: string | null; analysisPath: string | null } {
+  const config = MARKET_CONFIGS[market];
+  const filename = buildReportFilename(homeTeam, awayTeam, date, config.toolName);
+
+  // Check data/reports/ first, then project root (CLI-generated reports)
+  const candidates = [
+    path.join(REPORTS_DIR, filename),
+    path.join(PROJECT_ROOT, filename),
+  ];
+
+  for (const reportPath of candidates) {
+    if (fs.existsSync(reportPath)) {
+      const analysisPath = reportPath.replace(/\.md$/, '-analysis.md');
+      return {
+        reportPath,
+        analysisPath: fs.existsSync(analysisPath) ? analysisPath : null,
+      };
+    }
+  }
+
+  return { reportPath: null, analysisPath: null };
+}
+
 /** Run the full pipeline for a job: collect data, then optionally analyze. */
 export async function runPipelineForJob(
   job: Job,

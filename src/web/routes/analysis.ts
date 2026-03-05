@@ -4,7 +4,7 @@
 
 import { FastifyInstance } from 'fastify';
 import { jobManager, MarketType } from '../services/job-manager';
-import { runPipelineForJob } from '../services/pipeline-service';
+import { runPipelineForJob, getCachedPaths } from '../services/pipeline-service';
 
 export async function analysisRoutes(app: FastifyInstance): Promise<void> {
   /** Launch a new analysis job */
@@ -15,6 +15,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       date?: string;
       market?: string;
       analyze?: boolean;
+      force?: boolean;
     };
 
     const homeTeam = body.homeTeam?.trim();
@@ -48,6 +49,26 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     );
     if (existing) {
       return { jobId: existing.id, status: existing.status, duplicate: true };
+    }
+
+    // Check for cached results on disk (unless force re-run)
+    if (!body.force) {
+      const cached = getCachedPaths(homeTeam, awayTeam, date, market);
+      if (cached.reportPath) {
+        const job = jobManager.create(homeTeam, awayTeam, date, market);
+        job.reportPath = cached.reportPath;
+        job.analysisPath = cached.analysisPath;
+        job.status = 'complete';
+        job.updatedAt = Date.now();
+        job.logs.push({ time: Date.now(), message: 'Loaded from cached results' });
+        return {
+          jobId: job.id,
+          status: 'complete',
+          cached: true,
+          hasReport: true,
+          hasAnalysis: !!cached.analysisPath,
+        };
+      }
     }
 
     const analyze = body.analyze !== false;
