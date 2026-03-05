@@ -78,6 +78,19 @@ export class MarkdownFormatter {
       s.push(this.formatLeagueContext(leagueContext));
     }
 
+    // Pre-computed goal stats summary (goal mode only)
+    if (isGoalMode && (teamA_matches.length > 0 || teamB_matches.length > 0)) {
+      s.push(`## Pre-computed Stats\n`);
+      if (teamA_matches.length > 0) {
+        s.push(`### ${teamA_name} (Home filter)\n`);
+        s.push(this.formatGoalSummary(teamA_matches, 'H'));
+      }
+      if (teamB_matches.length > 0) {
+        s.push(`### ${teamB_name} (Away filter)\n`);
+        s.push(this.formatGoalSummary(teamB_matches, 'A'));
+      }
+    }
+
     if (matchNewsSummary?.trim()) {
       s.push(`## Match News\n`);
       s.push(matchNewsSummary.trim());
@@ -347,6 +360,115 @@ export class MarkdownFormatter {
     lines.push(`- Over 1.5: ${ctx.over15Pct}% · Over 2.5: ${ctx.over25Pct}% · Over 3.5: ${ctx.over35Pct}%`);
     lines.push(`- Clean sheet: Home ${ctx.cleanSheetHomePct}%, Away ${ctx.cleanSheetAwayPct}%`);
     return lines.join('\n') + '\n';
+  }
+
+  // ── Pre-computed Goal Stats ─────────────────────────────────────────────
+
+  private formatGoalSummary(matches: MatchDetails[], venueFilter: 'H' | 'A'): string {
+    const lines: string[] = [];
+    const all = matches;
+    const venue = matches.filter(m => m.venue === venueFilter);
+
+    const parseScore = (result: string): [number, number] | null => {
+      const parts = result.split(':').map(Number);
+      if (parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+        return [parts[0], parts[1]];
+      }
+      return null;
+    };
+
+    const computeStats = (ms: MatchDetails[], label: string) => {
+      const validScores = ms.map(m => parseScore(m.result)).filter((s): s is [number, number] => s !== null);
+      const n = validScores.length;
+      if (n === 0) return;
+
+      const scored = validScores.map(s => s[0]);
+      const conceded = validScores.map(s => s[1]);
+      const totals = validScores.map(s => s[0] + s[1]);
+
+      const avg = (arr: number[]) => (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
+      const pct = (arr: number[], cond: (v: number) => boolean) =>
+        ((arr.filter(cond).length / arr.length) * 100).toFixed(1);
+
+      lines.push(`${label} (n=${n}):`);
+      lines.push(`- Scored: avg ${avg(scored)} · Conceded: avg ${avg(conceded)} · Total: avg ${avg(totals)}`);
+      const bttsPct = ((validScores.filter(s => s[0] > 0 && s[1] > 0).length / n) * 100).toFixed(1);
+      lines.push(`- BTTS: ${bttsPct}%` +
+        ` · Clean sheet: ${pct(conceded, v => v === 0)}%` +
+        ` · Failed to score: ${pct(scored, v => v === 0)}%`);
+      lines.push(`- Over 1.5: ${pct(totals, v => v > 1.5)}%` +
+        ` · Over 2.5: ${pct(totals, v => v > 2.5)}%` +
+        ` · Over 3.5: ${pct(totals, v => v > 3.5)}%`);
+
+      // xG averages if available
+      const xgVals = ms
+        .map(m => m.stats?.expected_goals)
+        .filter((v): v is number => v != null);
+      const xgaVals = ms
+        .map(m => m.opponent_stats?.expected_goals)
+        .filter((v): v is number => v != null);
+      if (xgVals.length > 0) {
+        const xgAvg = avg(xgVals);
+        const xgSum = xgVals.reduce((a, b) => a + b, 0);
+        const ratioStr = xgSum > 0
+          ? ` · Goals/xG ratio: ${(scored.reduce((a, b) => a + b, 0) / xgSum).toFixed(2)}`
+          : '';
+        lines.push(`- xG avg: ${xgAvg}` +
+          (xgaVals.length > 0 ? ` · xGA avg: ${avg(xgaVals)}` : '') +
+          ratioStr);
+      }
+    };
+
+    computeStats(venue, venueFilter === 'H' ? 'Home games' : 'Away games');
+    computeStats(all, 'All games');
+
+    // Goal timing distribution
+    const allGoalMinutes: number[] = [];
+    const allConcededMinutes: number[] = [];
+    for (const m of all) {
+      for (const g of m.goal_events) {
+        const min = this.parseMinute(g.minute);
+        if (min != null) allGoalMinutes.push(min);
+      }
+      for (const g of m.opponent_goal_events) {
+        const min = this.parseMinute(g.minute);
+        if (min != null) allConcededMinutes.push(min);
+      }
+    }
+
+    if (allGoalMinutes.length > 0 || allConcededMinutes.length > 0) {
+      const bin = (minutes: number[]) => {
+        const total = minutes.length;
+        if (total === 0) return 'none';
+        const bins = [
+          { label: '1-15', count: minutes.filter(m => m >= 1 && m <= 15).length },
+          { label: '16-30', count: minutes.filter(m => m >= 16 && m <= 30).length },
+          { label: '31-HT', count: minutes.filter(m => m >= 31 && m <= 45).length },
+          { label: '46-60', count: minutes.filter(m => m >= 46 && m <= 60).length },
+          { label: '61-75', count: minutes.filter(m => m >= 61 && m <= 75).length },
+          { label: '76-FT', count: minutes.filter(m => m >= 76).length },
+        ];
+        return bins.map(b => `${b.label}: ${b.count} (${((b.count / total) * 100).toFixed(0)}%)`).join(', ');
+      };
+
+      lines.push('Goal timing (all games):');
+      if (allGoalMinutes.length > 0) {
+        lines.push(`- Scored (${allGoalMinutes.length}): ${bin(allGoalMinutes)}`);
+      }
+      if (allConcededMinutes.length > 0) {
+        lines.push(`- Conceded (${allConcededMinutes.length}): ${bin(allConcededMinutes)}`);
+      }
+    }
+
+    return lines.join('\n') + '\n';
+  }
+
+  private parseMinute(minute: string): number | null {
+    // Parse "23'", "45+2'", "90+4'" -> base minute only (23, 45, 90)
+    // Stoppage time is ignored for binning — "45+2'" belongs to first half (31-HT)
+    const m = minute.match(/^(\d+)/);
+    if (!m) return null;
+    return parseInt(m[1], 10);
   }
 
   // ── H2H ───────────────────────────────────────────────────────────────────

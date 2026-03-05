@@ -38,10 +38,12 @@ From each team's 20 games, exclude missing-data games (goals or xG marked "-"). 
 
 ### 1B. Team A (Home) & 1C. Team B (Away) -- Goal Stats
 
+The report includes a "Pre-computed Stats" section with venue-filtered and all-games averages, BTTS/clean sheet/over-under frequencies, xG ratios, and goal timing distributions. **Use these pre-computed values as your starting point** -- they are machine-verified. Focus your analysis on interpreting them, checking for trends, and identifying context the numbers alone cannot capture.
+
 For each team:
 
-1. **Venue-filtered subset** (Home for Team A, Away for Team B): mean, median, range, **variance** of goals scored, goals conceded, and total match goals. If < 5 games, flag as small-sample.
-2. **All-games baseline**: same stats including variance.
+1. **Venue-filtered subset** (Home for Team A, Away for Team B): use the pre-computed averages for scored, conceded, total. Compute median, range, and **variance** yourself from the raw match data. If < 5 venue games, flag as small-sample.
+2. **All-games baseline**: same stats including variance. Use pre-computed averages as starting point.
 3. **Venue vs overall delta**.
 4. **Trend**: compare the most recent ~6 games vs the rest. Note outlier-driven trends.
 5. **xG analysis**: compare actual goals vs xG. Are they overperforming or underperforming xG? What is the xG-to-goals ratio (venue-filtered and all-games)? Teams significantly overperforming xG (ratio > 1.15) are regression candidates; underperformers (< 0.85) may improve.
@@ -52,7 +54,7 @@ For each team:
 10. **BTTS frequency**: In what % of games did both teams score? (Venue-filtered and all-games.)
 11. **Clean sheet frequency**: How often does this team keep a clean sheet? How often do they fail to score?
 12. **First-half goals**: average first-half goals scored/conceded. HT score patterns.
-13. **Goal timing**: when do goals tend to fall (first 30', 31-60', 61-90+')? Note if the team is a strong starter vs finisher.
+13. **Goal timing**: the pre-computed stats include a goal timing distribution by 15-minute periods. Identify if the team is a strong starter (heavy 1-30' scoring), finisher (76-FT), or concedes late (opponent 76-FT cluster). These patterns matter for half-time markets and live betting context.
 14. **PPDA (pressing intensity)**: PPDA = passes allowed per defensive action (lower = more aggressive press). Compute avg PPDA for team and opponents (venue-filtered and all-games). High-pressing teams (PPDA < 10) force turnovers in dangerous areas, creating more chances; passive teams (PPDA > 14) concede territory. Compare each team's PPDA vs their opponents' PPDA -- a mismatch (e.g. aggressive presser vs team that struggles under pressure) signals goal-scoring opportunities.
 15. **Deep completions**: passes completed into the zone near the opponent's penalty box. Higher deep completions indicate sustained attacking penetration. Compare venue-filtered vs all-games. Teams with high deep completions but low goals may be wasteful in the final third; low deep completions with high goals suggests counter-attacking efficiency.
 16. **xPts (expected points)**: per-match expected points based on xG model. Sum xPts across recent games and compare to actual points. A team with many more actual points than xPts has been "lucky" (narrow wins, clinical finishing) and may regress. A team with fewer actual points than xPts has been "unlucky" (conceding late, missing sitters) and may improve. This is a key regression indicator.
