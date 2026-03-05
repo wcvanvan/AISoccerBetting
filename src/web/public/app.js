@@ -114,6 +114,9 @@ function renderEvents(events) {
   container.innerHTML = '';
   container.appendChild(customForm);
 
+  // Default date to today
+  document.getElementById('custom-date').value = new Date().toISOString().slice(0, 10);
+
   document.getElementById('custom-analyze').addEventListener('click', () => {
     const home = document.getElementById('custom-home').value.trim();
     const away = document.getElementById('custom-away').value.trim();
@@ -240,19 +243,31 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
     currentJobId = data.jobId;
     showPage('results');
     renderJobProgress(data.jobId, homeTeam, awayTeam, date, market);
+
+    if (data.duplicate) {
+      appendLog(data.jobId, 'Reconnecting to existing job...');
+    }
+
     connectSSE(data.jobId);
   } catch (err) {
     alert('Failed to start analysis: ' + err.message);
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.classList.remove('loading');
+    }
   }
 }
 
 let elapsedTimer = null;
+let tabCache = {}; // Cache loaded tab HTML by jobId:tabKey
 
 function renderJobProgress(jobId, home, away, date, market, skipTimer) {
   const container = document.getElementById('results-container');
   const marketLabel = market.charAt(0).toUpperCase() + market.slice(1);
 
   container.innerHTML = '';
+  tabCache = {};
 
   // Back link
   const backLink = document.createElement('a');
@@ -347,15 +362,23 @@ function connectSSE(jobId) {
   });
 
   eventSource.addEventListener('error', (e) => {
+    // Custom application-level error (has data) — close permanently
     if (e.data) {
       try {
         const data = JSON.parse(e.data);
         updateJobStatus(jobId, 'failed', data.error);
         appendLog(jobId, 'ERROR: ' + data.error);
       } catch (_) {}
+      eventSource.close();
+      eventSource = null;
+      return;
     }
-    eventSource.close();
-    eventSource = null;
+    // Native SSE connection error — browser auto-reconnects if readyState != CLOSED
+    // Only close if EventSource gave up (readyState === CLOSED)
+    if (eventSource.readyState === EventSource.CLOSED) {
+      appendLog(jobId, 'Connection lost');
+      eventSource = null;
+    }
   });
 }
 
@@ -451,6 +474,18 @@ async function renderResults(jobId) {
 
 async function loadTabContent(jobId, tab) {
   const container = document.getElementById('tab-content-' + jobId);
+  const cacheKey = jobId + ':' + tab;
+
+  // Serve from cache if available
+  if (tabCache[cacheKey]) {
+    container.innerHTML = '';
+    const body = document.createElement('div');
+    body.className = 'markdown-body';
+    body.innerHTML = tabCache[cacheKey];
+    container.appendChild(body);
+    return;
+  }
+
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
 
   try {
@@ -468,6 +503,7 @@ async function loadTabContent(jobId, tab) {
       return;
     }
 
+    tabCache[cacheKey] = data.html;
     container.innerHTML = '';
     const body = document.createElement('div');
     body.className = 'markdown-body';
