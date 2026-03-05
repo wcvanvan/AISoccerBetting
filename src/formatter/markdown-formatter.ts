@@ -108,9 +108,9 @@ export class MarkdownFormatter {
         line1 += this.formatGoalStatsInline(m.stats, m.opponent_stats);
       }
 
-      // Card-mode stats inline
+      // Card-mode stats inline (prefer event counts over boxscore when boxscore is 0)
       if (isCardMode) {
-        line1 += this.formatCardStatsInline(m.stats, m.opponent_stats);
+        line1 += this.formatCardStatsInline(m.stats, m.opponent_stats, m.card_events, m.opponent_card_events);
       }
 
       // Render extras if present
@@ -204,24 +204,36 @@ export class MarkdownFormatter {
   private formatCardStatsInline(
     stats: MatchStats | null | undefined,
     oppStats: MatchStats | null | undefined,
+    teamCards?: CardEvent[],
+    oppCards?: CardEvent[],
   ): string {
     const parts: string[] = [];
 
-    const yc = stats?.yellow_cards;
-    const ycO = oppStats?.yellow_cards;
-    if (yc != null) {
-      parts.push(ycO != null ? `YC ${yc}-${ycO}` : `YC ${yc}`);
+    // Prefer event counts when boxscore stats are 0 but events exist
+    const countYellow = (events?: CardEvent[]) =>
+      (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
+    const countRed = (events?: CardEvent[]) =>
+      (events ?? []).filter(c => c.card_type === 'red' || c.card_type === 'second_yellow').length;
+
+    let yc = stats?.yellow_cards ?? 0;
+    let ycO = oppStats?.yellow_cards ?? 0;
+    if (yc === 0 && countYellow(teamCards) > 0) yc = countYellow(teamCards);
+    if (ycO === 0 && countYellow(oppCards) > 0) ycO = countYellow(oppCards);
+    if (yc > 0 || ycO > 0) {
+      parts.push(`YC ${yc}-${ycO}`);
     }
 
-    const rc = stats?.red_cards;
-    const rcO = oppStats?.red_cards;
-    if (rc != null && rc > 0) {
-      parts.push(rcO != null && rcO > 0 ? `RC ${rc}-${rcO}` : `RC ${rc}`);
+    let rc = stats?.red_cards ?? 0;
+    let rcO = oppStats?.red_cards ?? 0;
+    if (rc === 0 && countRed(teamCards) > 0) rc = countRed(teamCards);
+    if (rcO === 0 && countRed(oppCards) > 0) rcO = countRed(oppCards);
+    if (rc > 0 || rcO > 0) {
+      parts.push(`RC ${rc}-${rcO}`);
     }
 
     const fl = stats?.fouls;
     const flO = oppStats?.fouls;
-    if (fl != null) {
+    if (fl != null && fl > 0) {
       parts.push(flO != null ? `Fouls ${fl}-${flO}` : `Fouls ${fl}`);
     }
 
@@ -336,14 +348,21 @@ export class MarkdownFormatter {
 
   private formatH2HCardStats(m: H2HMatch, teamA: string, teamB: string): string {
     const parts: string[] = [];
-    const ycA = m.teamA_stats?.yellow_cards;
-    const ycB = m.teamB_stats?.yellow_cards;
-    if (ycA != null && ycB != null) {
+
+    const countYellow = (events?: CardEvent[]) =>
+      (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
+
+    let ycA = m.teamA_stats?.yellow_cards ?? 0;
+    let ycB = m.teamB_stats?.yellow_cards ?? 0;
+    if (ycA === 0 && countYellow(m.teamA_card_events) > 0) ycA = countYellow(m.teamA_card_events);
+    if (ycB === 0 && countYellow(m.teamB_card_events) > 0) ycB = countYellow(m.teamB_card_events);
+    if (ycA > 0 || ycB > 0) {
       parts.push(`YC ${teamA} ${ycA}, ${teamB} ${ycB}`);
     }
+
     const flA = m.teamA_stats?.fouls;
     const flB = m.teamB_stats?.fouls;
-    if (flA != null && flB != null) {
+    if (flA != null && flA > 0 && flB != null && flB > 0) {
       parts.push(`Fouls ${flA}-${flB}`);
     }
     return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
