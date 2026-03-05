@@ -8,3 +8,4 @@ export * from './collector';
 export * from './formatter';
 export * from './provider';
 export * from './odds';
+export * from './cache';

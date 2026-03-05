@@ -467,6 +467,13 @@ class DataAssembler:
                 "corners_conceded": None,
                 "total_corners": None,
                 "result": f"{team_score}:{opp_score}",
+                "stats": None,
+                "opponent_stats": None,
+                "first_half_result": None,
+                "goal_events": [],
+                "opponent_goal_events": [],
+                "card_events": [],
+                "opponent_card_events": [],
                 "game_id": game_id,
                 "game": str(row.get("game", "")),
             }
@@ -564,6 +571,13 @@ class DataAssembler:
             "teamB_corners": None,
             "total_corners": None,
             "result": f"{a_score}:{b_score}",
+            "teamA_stats": None,
+            "teamB_stats": None,
+            "first_half_result": None,
+            "teamA_goal_events": [],
+            "teamB_goal_events": [],
+            "teamA_card_events": [],
+            "teamB_card_events": [],
             "game_id": row.get("game_id"),
         }
 
@@ -589,13 +603,140 @@ class DataAssembler:
                 log.warning("Failed to fetch summary for game %s: %s", gid, exc)
         return result
 
+    # ── Stat extraction helpers ─────────────────────────────────────────
+
+    @staticmethod
+    def _extract_stats(team_data: dict) -> dict[str, Any]:
+        """Extract match stats (shots, xG, fouls, cards, etc.) from boxscore team data."""
+        stats: dict[str, Any] = {
+            "shots": None,
+            "shots_on_target": None,
+            "expected_goals": None,
+            "saves": None,
+            "fouls": None,
+            "yellow_cards": None,
+            "red_cards": None,
+            "possession": None,
+        }
+        stat_map = {
+            "totalShots": "shots",
+            "shotsOnTarget": "shots_on_target",
+            "expectedGoals": "expected_goals",
+            "saves": "saves",
+            "foulsCommitted": "fouls",
+            "yellowCards": "yellow_cards",
+            "redCards": "red_cards",
+            "possessionPct": "possession",
+        }
+        for stat in team_data.get("statistics", []):
+            name = stat.get("name", "")
+            if name in stat_map:
+                try:
+                    val = stat.get("displayValue")
+                    if val is not None:
+                        stats[stat_map[name]] = float(val) if "." in str(val) else int(val)
+                except (ValueError, TypeError):
+                    pass
+        return stats
+
+    @staticmethod
+    def _extract_goal_events(data: dict, team_idx: int) -> list[dict[str, str]]:
+        """Extract goal events (scorer + minute) from ESPN key events / scoring plays."""
+        goals: list[dict[str, str]] = []
+        # Try keyEvents first, then scoringPlays
+        events = data.get("keyEvents", []) or []
+        for ev in events:
+            play = ev.get("play", ev)
+            ptype = play.get("type", {}).get("text", "").lower()
+            if "goal" not in ptype:
+                continue
+            # Check team index
+            ev_team = play.get("team", {}).get("id")
+            form_data = data.get("boxscore", {}).get("form", [])
+            if len(form_data) > team_idx:
+                expected_team_id = str(form_data[team_idx].get("team", {}).get("id", ""))
+                if str(ev_team) != expected_team_id:
+                    continue
+            clock = play.get("clock", {}).get("displayValue", "")
+            participants = play.get("participants", [])
+            scorer = participants[0].get("athlete", {}).get("displayName", "") if participants else ""
+            if scorer and clock:
+                goals.append({"player": scorer, "minute": clock})
+        # Fallback: parse scoring plays from header
+        if not goals:
+            scoring = data.get("scoringPlays", [])
+            for sp in scoring:
+                sp_team_idx = sp.get("team", {}).get("order", 1) - 1
+                if sp_team_idx != team_idx:
+                    continue
+                clock = sp.get("clock", {}).get("displayValue", "")
+                text = sp.get("text", "")
+                scorer = text.split("(")[0].strip().split("-")[0].strip() if text else ""
+                if scorer and clock:
+                    goals.append({"player": scorer, "minute": clock})
+        return goals
+
+    @staticmethod
+    def _extract_card_events(data: dict, team_idx: int) -> list[dict[str, str]]:
+        """Extract card events from ESPN key events."""
+        cards: list[dict[str, str]] = []
+        events = data.get("keyEvents", []) or []
+        for ev in events:
+            play = ev.get("play", ev)
+            ptype = play.get("type", {}).get("text", "").lower()
+            card_type = None
+            if "red card" in ptype or "red-card" in ptype:
+                card_type = "red"
+            elif "second yellow" in ptype or "second-yellow" in ptype:
+                card_type = "second_yellow"
+            elif "yellow card" in ptype or "yellow-card" in ptype:
+                card_type = "yellow"
+            if not card_type:
+                continue
+            ev_team = play.get("team", {}).get("id")
+            form_data = data.get("boxscore", {}).get("form", [])
+            if len(form_data) > team_idx:
+                expected_team_id = str(form_data[team_idx].get("team", {}).get("id", ""))
+                if str(ev_team) != expected_team_id:
+                    continue
+            clock = play.get("clock", {}).get("displayValue", "")
+            participants = play.get("participants", [])
+            player = participants[0].get("athlete", {}).get("displayName", "") if participants else ""
+            if player and clock:
+                cards.append({"player": player, "minute": clock, "card_type": card_type})
+        return cards
+
+    @staticmethod
+    def _extract_ht_score(data: dict) -> tuple[int | None, int | None]:
+        """Extract half-time score from ESPN summary linescores."""
+        try:
+            header = data.get("header", {})
+            competitions = header.get("competitions", [])
+            if not competitions:
+                return None, None
+            competitors = competitions[0].get("competitors", [])
+            if len(competitors) < 2:
+                return None, None
+            home_ht = away_ht = None
+            for c in competitors:
+                linescores = c.get("linescores", [])
+                if linescores:
+                    first_half = int(linescores[0].get("displayValue", 0))
+                    if c.get("homeAway") == "home":
+                        home_ht = first_half
+                    else:
+                        away_ht = first_half
+            return home_ht, away_ht
+        except Exception:
+            return None, None
+
     def _enrich_from_summaries(
         self,
         matches: list[dict[str, Any]],
         summaries: dict[int, dict],
         team: str,
     ) -> list[dict[str, Any]]:
-        """Enrich matches with corners + lineup from raw summary JSON."""
+        """Enrich matches with corners, stats, goals, cards, lineup from summary JSON."""
         norm_team = team.lower()
 
         for match in matches:
@@ -604,12 +745,21 @@ class DataAssembler:
                 continue
             data = summaries[int(gid)]
 
-            # -- Corners from boxscore stats --
             teams_data = data.get("boxscore", {}).get("teams", [])
+            form_data = data.get("boxscore", {}).get("form", [])
+            team_idx = None
+            opp_idx = None
+
             for i, td in enumerate(teams_data):
-                td_name = data.get("boxscore", {}).get("form", [{}] * 2)[i].get("team", {}).get("displayName", "")
+                td_name = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
                 is_team = norm_team in td_name.lower() or td_name.lower() in norm_team
 
+                if is_team:
+                    team_idx = i
+                else:
+                    opp_idx = i
+
+                # -- Corners --
                 for stat in td.get("statistics", []):
                     if stat.get("name") == "wonCorners":
                         corners_val = int(stat.get("displayValue", 0))
@@ -621,15 +771,39 @@ class DataAssembler:
             if match["corners_won"] is not None and match["corners_conceded"] is not None:
                 match["total_corners"] = match["corners_won"] + match["corners_conceded"]
 
+            # -- Stats --
+            if team_idx is not None and team_idx < len(teams_data):
+                match["stats"] = self._extract_stats(teams_data[team_idx])
+            if opp_idx is not None and opp_idx < len(teams_data):
+                match["opponent_stats"] = self._extract_stats(teams_data[opp_idx])
+
+            # -- HT score --
+            home_ht, away_ht = self._extract_ht_score(data)
+            if home_ht is not None and away_ht is not None:
+                is_home = match.get("venue") == "H"
+                t_ht = home_ht if is_home else away_ht
+                o_ht = away_ht if is_home else home_ht
+                match["first_half_result"] = f"{t_ht}:{o_ht}"
+
+            # -- Goal events --
+            if team_idx is not None:
+                match["goal_events"] = self._extract_goal_events(data, team_idx)
+            if opp_idx is not None:
+                match["opponent_goal_events"] = self._extract_goal_events(data, opp_idx)
+
+            # -- Card events --
+            if team_idx is not None:
+                match["card_events"] = self._extract_card_events(data, team_idx)
+            if opp_idx is not None:
+                match["opponent_card_events"] = self._extract_card_events(data, opp_idx)
+
             # -- Lineup from rosters --
             rosters = data.get("rosters", [])
-            form_data = data.get("boxscore", {}).get("form", [])
             for i, roster in enumerate(rosters):
                 roster_team = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
                 if not (norm_team in roster_team.lower() or roster_team.lower() in norm_team):
                     continue
 
-                # Formation (stored directly on the roster object, not in boxscore.form)
                 formation = roster.get("formation")
                 if formation:
                     match["formation"] = str(formation)
@@ -681,16 +855,27 @@ class DataAssembler:
         form_data = data.get("boxscore", {}).get("form", [])
         rosters = data.get("rosters", [])
 
+        a_idx = None
+        b_idx = None
+
         for i, td in enumerate(teams_data):
             td_name = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
             is_home = (i == 0)
             is_a = (is_home and a_is_home) or (not is_home and not a_is_home)
             prefix = "teamA" if is_a else "teamB"
 
+            if is_a:
+                a_idx = i
+            else:
+                b_idx = i
+
             # Corners
             for stat in td.get("statistics", []):
                 if stat.get("name") == "wonCorners":
                     h2h[f"{prefix}_corners"] = int(stat.get("displayValue", 0))
+
+            # Stats
+            h2h[f"{prefix}_stats"] = self._extract_stats(td)
 
             # Formation + lineup from roster
             if i < len(rosters):
@@ -724,6 +909,25 @@ class DataAssembler:
 
         if h2h["teamA_corners"] is not None and h2h["teamB_corners"] is not None:
             h2h["total_corners"] = h2h["teamA_corners"] + h2h["teamB_corners"]
+
+        # HT score
+        home_ht, away_ht = self._extract_ht_score(data)
+        if home_ht is not None and away_ht is not None:
+            a_ht = home_ht if a_is_home else away_ht
+            b_ht = away_ht if a_is_home else home_ht
+            h2h["first_half_result"] = f"{a_ht}:{b_ht}"
+
+        # Goal events
+        if a_idx is not None:
+            h2h["teamA_goal_events"] = self._extract_goal_events(data, a_idx)
+        if b_idx is not None:
+            h2h["teamB_goal_events"] = self._extract_goal_events(data, b_idx)
+
+        # Card events
+        if a_idx is not None:
+            h2h["teamA_card_events"] = self._extract_card_events(data, a_idx)
+        if b_idx is not None:
+            h2h["teamB_card_events"] = self._extract_card_events(data, b_idx)
 
     # ── Understat enrichment ─────────────────────────────────────────────
 

@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 
 import { DataProvider } from './data-provider';
-import { MatchDetails, H2HMatch, Substitute, SubbedOffPlayer } from '../types';
+import { MatchDetails, H2HMatch, Substitute, SubbedOffPlayer, MatchStats, GoalEvent, CardEvent } from '../types';
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 const BRIDGE_SCRIPT = path.resolve(__dirname, '../../scripts/soccerdata_bridge.py');
@@ -191,6 +191,13 @@ function toMatchDetails(raw: Record<string, unknown>): MatchDetails {
     corners_conceded: toNullableNumber(raw.corners_conceded),
     total_corners: toNullableNumber(raw.total_corners),
     result: String(raw.result ?? 'N/A'),
+    stats: toMatchStats(raw.stats),
+    opponent_stats: toMatchStats(raw.opponent_stats),
+    first_half_result: raw.first_half_result != null ? String(raw.first_half_result) : null,
+    goal_events: toGoalEvents(raw.goal_events),
+    opponent_goal_events: toGoalEvents(raw.opponent_goal_events),
+    card_events: toCardEvents(raw.card_events),
+    opponent_card_events: toCardEvents(raw.opponent_card_events),
     extras: raw.extras as Record<string, string | number | null> | undefined,
   };
 }
@@ -212,6 +219,13 @@ function toH2HMatch(raw: Record<string, unknown>): H2HMatch {
     teamB_corners: toNullableNumber(raw.teamB_corners),
     total_corners: toNullableNumber(raw.total_corners),
     result: String(raw.result ?? 'N/A'),
+    teamA_stats: toMatchStats(raw.teamA_stats),
+    teamB_stats: toMatchStats(raw.teamB_stats),
+    first_half_result: raw.first_half_result != null ? String(raw.first_half_result) : null,
+    teamA_goal_events: toGoalEvents(raw.teamA_goal_events),
+    teamB_goal_events: toGoalEvents(raw.teamB_goal_events),
+    teamA_card_events: toCardEvents(raw.teamA_card_events),
+    teamB_card_events: toCardEvents(raw.teamB_card_events),
     teamA_extras: raw.teamA_extras as Record<string, string | number | null> | undefined,
     teamB_extras: raw.teamB_extras as Record<string, string | number | null> | undefined,
   };
@@ -245,4 +259,42 @@ function toNullableNumber(val: unknown): number | null {
   if (val == null) return null;
   const n = Number(val);
   return Number.isFinite(n) ? n : null;
+}
+
+function toMatchStats(val: unknown): MatchStats | null {
+  if (val == null || typeof val !== 'object') return null;
+  const raw = val as Record<string, unknown>;
+  return {
+    shots: toNullableNumber(raw.shots),
+    shots_on_target: toNullableNumber(raw.shots_on_target),
+    expected_goals: toNullableNumber(raw.expected_goals),
+    saves: toNullableNumber(raw.saves),
+    fouls: toNullableNumber(raw.fouls),
+    yellow_cards: toNullableNumber(raw.yellow_cards),
+    red_cards: toNullableNumber(raw.red_cards),
+    possession: toNullableNumber(raw.possession),
+  };
+}
+
+function toGoalEvents(val: unknown): GoalEvent[] {
+  if (!Array.isArray(val)) return [];
+  return val
+    .filter((v): v is Record<string, unknown> => v != null && typeof v === 'object')
+    .map(v => ({
+      player: String(v.player ?? ''),
+      minute: String(v.minute ?? ''),
+    }));
+}
+
+function toCardEvents(val: unknown): CardEvent[] {
+  if (!Array.isArray(val)) return [];
+  return val
+    .filter((v): v is Record<string, unknown> => v != null && typeof v === 'object')
+    .map(v => ({
+      player: String(v.player ?? ''),
+      minute: String(v.minute ?? ''),
+      card_type: (['yellow', 'red', 'second_yellow'].includes(String(v.card_type))
+        ? String(v.card_type) as 'yellow' | 'red' | 'second_yellow'
+        : 'yellow'),
+    }));
 }

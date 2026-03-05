@@ -2,10 +2,15 @@
  * MarkdownFormatter — produces a compact, structured Markdown report
  * optimised for downstream agent consumption (minimal tokens, clear delimiters)
  * while remaining human-readable.
+ *
+ * Parameterised via FormatOptions to support corner, goal, and card pipelines.
  */
 
 import {
   MatchDetails,
+  MatchStats,
+  GoalEvent,
+  CardEvent,
   H2HMatch,
   Substitute,
   SubbedOffPlayer,
@@ -15,7 +20,7 @@ import { MatchOdds } from '../odds/types';
 export interface FormatOptions {
   /** Show corner data in match lines (default: true) */
   showCorners: boolean;
-  /** Label for odds section, e.g. "Corner" or "Goal" (default: "Corner") */
+  /** Label for odds section, e.g. "Corner", "Goal", or "Card" (default: "Corner") */
   oddsLabel: string;
 }
 
@@ -38,6 +43,8 @@ export class MarkdownFormatter {
     formatOptions?: Partial<FormatOptions>
   ): string {
     const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
+    const isGoalMode = opts.oddsLabel === 'Goal';
+    const isCardMode = opts.oddsLabel === 'Card';
     const s: string[] = [];
 
     s.push(`# ${teamA_name} vs ${teamB_name}\n`);
@@ -78,6 +85,8 @@ export class MarkdownFormatter {
 
   private formatTeamMatches(matches: MatchDetails[], opts: FormatOptions): string {
     if (matches.length === 0) return 'No matches available.\n';
+    const isGoalMode = opts.oddsLabel === 'Goal';
+    const isCardMode = opts.oddsLabel === 'Card';
 
     return matches.map((m, i) => {
       const venue = m.venue === 'H' ? 'Home' : m.venue === 'A' ? 'Away' : m.venue;
@@ -90,7 +99,19 @@ export class MarkdownFormatter {
         line1 += ` · Corners: ${cW}w-${cC}c (${cT})`;
       }
 
-      line1 += ` · ${m.result}`;
+      // Result with optional HT score
+      const htPart = m.first_half_result ? ` (HT ${m.first_half_result})` : '';
+      line1 += ` · ${m.result}${htPart}`;
+
+      // Goal-mode stats inline
+      if (isGoalMode) {
+        line1 += this.formatGoalStatsInline(m.stats, m.opponent_stats);
+      }
+
+      // Card-mode stats inline
+      if (isCardMode) {
+        line1 += this.formatCardStatsInline(m.stats, m.opponent_stats);
+      }
 
       // Render extras if present
       if (m.extras && Object.keys(m.extras).length > 0) {
@@ -99,8 +120,112 @@ export class MarkdownFormatter {
       }
 
       const lineup = this.formatLineup(m.starting_lineup, m.starters_subbed_off, m.substitutes);
-      return `${line1}\n   XI: ${lineup}`;
+      let lines = `${line1}\n   XI: ${lineup}`;
+
+      // Goal events
+      if (isGoalMode) {
+        const goalsLine = this.formatGoalEventsLine(m.goal_events, m.opponent_goal_events);
+        if (goalsLine) lines += `\n   ${goalsLine}`;
+      }
+
+      // Card events
+      if (isCardMode) {
+        const cardsLine = this.formatCardEventsLine(m.card_events, m.opponent_card_events);
+        if (cardsLine) lines += `\n   ${cardsLine}`;
+      }
+
+      return lines;
     }).join('\n') + '\n';
+  }
+
+  // ── Goal formatting helpers ───────────────────────────────────────────────
+
+  private formatGoalEventsLine(
+    teamGoals: GoalEvent[] | undefined,
+    oppGoals: GoalEvent[] | undefined,
+  ): string | null {
+    const tg = teamGoals ?? [];
+    const og = oppGoals ?? [];
+    if (tg.length === 0 && og.length === 0) return null;
+    const parts: string[] = [];
+    if (tg.length > 0) parts.push(`Goals: ${tg.map(g => `${g.player} ${g.minute}`).join(', ')}`);
+    if (og.length > 0) parts.push(`Opp: ${og.map(g => `${g.player} ${g.minute}`).join(', ')}`);
+    return parts.join(' | ');
+  }
+
+  private formatGoalStatsInline(
+    stats: MatchStats | null | undefined,
+    oppStats: MatchStats | null | undefined,
+  ): string {
+    const parts: string[] = [];
+
+    const xgT = stats?.expected_goals;
+    const xgO = oppStats?.expected_goals;
+    if (xgT != null) {
+      parts.push(xgO != null ? `xG ${xgT.toFixed(2)}-${xgO.toFixed(2)}` : `xG ${xgT.toFixed(2)}`);
+    }
+
+    const shT = stats?.shots;
+    const sotT = stats?.shots_on_target;
+    const shO = oppStats?.shots;
+    const sotO = oppStats?.shots_on_target;
+    if (shT != null) {
+      const tPart = sotT != null ? `${shT}(${sotT})` : `${shT}`;
+      if (shO != null) {
+        const oPart = sotO != null ? `${shO}(${sotO})` : `${shO}`;
+        parts.push(`Sh ${tPart}-${oPart}`);
+      } else {
+        parts.push(`Sh ${tPart}`);
+      }
+    }
+
+    return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
+  }
+
+  // ── Card formatting helpers ───────────────────────────────────────────────
+
+  private formatCardEventsLine(
+    teamCards: CardEvent[] | undefined,
+    oppCards: CardEvent[] | undefined,
+  ): string | null {
+    const tc = teamCards ?? [];
+    const oc = oppCards ?? [];
+    if (tc.length === 0 && oc.length === 0) return null;
+    const fmtCard = (c: CardEvent) => {
+      const type = c.card_type === 'red' ? 'RED' : c.card_type === 'second_yellow' ? '2Y' : 'Y';
+      return `${c.player} ${c.minute} (${type})`;
+    };
+    const parts: string[] = [];
+    if (tc.length > 0) parts.push(`Cards: ${tc.map(fmtCard).join(', ')}`);
+    if (oc.length > 0) parts.push(`Opp: ${oc.map(fmtCard).join(', ')}`);
+    return parts.join(' | ');
+  }
+
+  private formatCardStatsInline(
+    stats: MatchStats | null | undefined,
+    oppStats: MatchStats | null | undefined,
+  ): string {
+    const parts: string[] = [];
+
+    const yc = stats?.yellow_cards;
+    const ycO = oppStats?.yellow_cards;
+    if (yc != null) {
+      parts.push(ycO != null ? `YC ${yc}-${ycO}` : `YC ${yc}`);
+    }
+
+    const rc = stats?.red_cards;
+    const rcO = oppStats?.red_cards;
+    if (rc != null && rc > 0) {
+      parts.push(rcO != null && rcO > 0 ? `RC ${rc}-${rcO}` : `RC ${rc}`);
+    }
+
+    const fl = stats?.fouls;
+    const flO = oppStats?.fouls;
+    if (fl != null) {
+      parts.push(flO != null ? `Fouls ${fl}-${flO}` : `Fouls ${fl}`);
+    }
+
+    return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
   }
 
   // ── Lineup ────────────────────────────────────────────────────────────────
@@ -131,6 +256,9 @@ export class MarkdownFormatter {
   // ── H2H ───────────────────────────────────────────────────────────────────
 
   private formatH2H(matches: H2HMatch[], teamA: string, teamB: string, opts: FormatOptions): string {
+    const isGoalMode = opts.oddsLabel === 'Goal';
+    const isCardMode = opts.oddsLabel === 'Card';
+
     return matches.map(m => {
       let header = `${m.date} · ${m.venue} · ${m.competition}`;
 
@@ -141,7 +269,19 @@ export class MarkdownFormatter {
         header += ` · Corners: ${teamA} ${cA}, ${teamB} ${cB} (${cT})`;
       }
 
-      header += ` · ${m.result}`;
+      // Result with optional HT score
+      const htPart = m.first_half_result ? ` (HT ${m.first_half_result})` : '';
+      header += ` · ${m.result}${htPart}`;
+
+      // Goal stats in H2H
+      if (isGoalMode) {
+        header += this.formatH2HGoalStats(m, teamA, teamB);
+      }
+
+      // Card stats in H2H
+      if (isCardMode) {
+        header += this.formatH2HCardStats(m, teamA, teamB);
+      }
 
       // Render extras if present
       if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
@@ -153,8 +293,60 @@ export class MarkdownFormatter {
 
       const lineA = `${teamA} (${m.teamA_formation ?? '-'}): ${this.formatLineup(m.teamA_lineup, m.teamA_starters_subbed_off, m.teamA_substitutes)}`;
       const lineB = `${teamB} (${m.teamB_formation ?? '-'}): ${this.formatLineup(m.teamB_lineup, m.teamB_starters_subbed_off, m.teamB_substitutes)}`;
-      return `${header}\n${lineA}\n${lineB}`;
+      let block = `${header}\n${lineA}\n${lineB}`;
+
+      // Goal events in H2H
+      if (isGoalMode) {
+        const gA = this.formatGoalEventsLine(m.teamA_goal_events, undefined);
+        const gB = this.formatGoalEventsLine(m.teamB_goal_events, undefined);
+        if (gA) block += `\n  ${teamA} ${gA}`;
+        if (gB) block += `\n  ${teamB} ${gB}`;
+      }
+
+      // Card events in H2H
+      if (isCardMode) {
+        const cA = this.formatCardEventsLine(m.teamA_card_events, undefined);
+        const cB = this.formatCardEventsLine(m.teamB_card_events, undefined);
+        if (cA) block += `\n  ${teamA} ${cA}`;
+        if (cB) block += `\n  ${teamB} ${cB}`;
+      }
+
+      return block;
     }).join('\n\n') + '\n';
+  }
+
+  private formatH2HGoalStats(m: H2HMatch, teamA: string, teamB: string): string {
+    const parts: string[] = [];
+    const xgA = m.teamA_stats?.expected_goals;
+    const xgB = m.teamB_stats?.expected_goals;
+    if (xgA != null && xgB != null) {
+      parts.push(`xG ${teamA} ${xgA.toFixed(2)}, ${teamB} ${xgB.toFixed(2)}`);
+    }
+    const shA = m.teamA_stats?.shots;
+    const shB = m.teamB_stats?.shots;
+    if (shA != null && shB != null) {
+      const sotA = m.teamA_stats?.shots_on_target;
+      const sotB = m.teamB_stats?.shots_on_target;
+      const a = sotA != null ? `${shA}(${sotA})` : `${shA}`;
+      const b = sotB != null ? `${shB}(${sotB})` : `${shB}`;
+      parts.push(`Sh ${a}-${b}`);
+    }
+    return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
+  }
+
+  private formatH2HCardStats(m: H2HMatch, teamA: string, teamB: string): string {
+    const parts: string[] = [];
+    const ycA = m.teamA_stats?.yellow_cards;
+    const ycB = m.teamB_stats?.yellow_cards;
+    if (ycA != null && ycB != null) {
+      parts.push(`YC ${teamA} ${ycA}, ${teamB} ${ycB}`);
+    }
+    const flA = m.teamA_stats?.fouls;
+    const flB = m.teamB_stats?.fouls;
+    if (flA != null && flB != null) {
+      parts.push(`Fouls ${flA}-${flB}`);
+    }
+    return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
   }
 
   // ── Extras ─────────────────────────────────────────────────────────────────

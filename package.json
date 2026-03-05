@@ -11,6 +11,14 @@
     "corners:analyze": "ts-node src/cli-corners.ts --analyze",
     "corners:news": "ts-node src/cli-corners.ts --news",
     "corners:odds": "ts-node src/cli-corners.ts --odds",
+    "goals": "ts-node src/cli-goals.ts",
+    "goals:analyze": "ts-node src/cli-goals.ts --analyze",
+    "goals:news": "ts-node src/cli-goals.ts --news",
+    "goals:odds": "ts-node src/cli-goals.ts --odds",
+    "cards": "ts-node src/cli-cards.ts",
+    "cards:analyze": "ts-node src/cli-cards.ts --analyze",
+    "cards:news": "ts-node src/cli-cards.ts --news",
+    "cards:odds": "ts-node src/cli-cards.ts --odds",
     "test:connection": "ts-node src/cli-corners.ts --test-connection"
   },
   "keywords": [

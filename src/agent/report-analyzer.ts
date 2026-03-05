@@ -22,6 +22,7 @@ import { TavilySearch } from '@langchain/tavily';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
 import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './prompts/report-analysis-system-prompt';
+import { getCachedResponse, setCachedResponse } from '../cache';
 
 const DEFAULT_ANALYSIS_MODEL = 'claude-opus-4-6';
 const DEFAULT_ANALYSIS_TIMEOUT_SEC = 300;
@@ -48,6 +49,11 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
   configureAnthropicProxy();
 
   const model = process.env.ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL;
+  const prompt = systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT;
+
+  // Check cache first
+  const cached = getCachedResponse(model, prompt, report);
+  if (cached) return cached;
   const maxTokens = parsePositiveInt(process.env.ANALYSIS_MAX_TOKENS, DEFAULT_MAX_TOKENS);
   const thinkingBudget = parsePositiveInt(process.env.ANALYSIS_THINKING_BUDGET, DEFAULT_THINKING_BUDGET);
 
@@ -64,7 +70,7 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
   const hasTavily = !!process.env.TAVILY_API_KEY?.trim();
 
   const messages = [
-    new SystemMessage(systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT),
+    new SystemMessage(prompt),
     new HumanMessage(report),
   ];
 
@@ -74,10 +80,11 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
     timeoutSec,
   );
 
+  let result: string | undefined;
+
   if (typeof content === 'string' && content.trim()) {
-    return stripCodeFences(content.trim());
-  }
-  if (Array.isArray(content)) {
+    result = stripCodeFences(content.trim());
+  } else if (Array.isArray(content)) {
     const text = content
       .filter(
         (b): b is { type: string; text: string } =>
@@ -86,10 +93,14 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
       .map(b => b.text)
       .join('\n')
       .trim();
-    if (text) return stripCodeFences(text);
+    if (text) result = stripCodeFences(text);
   }
 
-  throw new Error('Analysis returned no text content.');
+  if (!result) throw new Error('Analysis returned no text content.');
+
+  // Cache the response
+  setCachedResponse(model, prompt, report, result);
+  return result;
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
