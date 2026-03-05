@@ -10,20 +10,50 @@ let activeLeagues = new Set([
   'soccer_spain_la_liga',
 ]);
 let eventsData = [];
+let currentUser = null; // { username, role }
+let currentMatch = null; // { home_team, away_team, date, league_key, league_label, commence_time }
+let currentMarket = 'goals';
 let currentJobId = null;
 let eventSource = null;
+let elapsedTimer = null;
+let tabCache = {};
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+async function loadUser() {
+  try {
+    const resp = await fetch('/api/me');
+    const data = await resp.json();
+    currentUser = data.user;
+    if (currentUser) {
+      const badge = document.getElementById('user-badge');
+      badge.textContent = currentUser.username;
+      badge.className = 'user-badge role-' + currentUser.role;
+    }
+  } catch (_) {
+    // If not authenticated, server redirects to login
+  }
+}
+
+async function logout() {
+  await fetch('/api/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+}
+
+function isAdmin() {
+  return currentUser && currentUser.role === 'admin';
+}
 
 // ── Page navigation ─────────────────────────────────────────────────────────
 
 function showPage(page) {
-  // Clean up resources when leaving results page
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
   if (eventSource) { eventSource.close(); eventSource = null; }
 
   document.querySelectorAll('.page').forEach((el) => el.classList.remove('active'));
   document.querySelectorAll('nav a').forEach((el) => el.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
-  const navLink = document.querySelector(`nav a[data-page="${page}"]`);
+  const navLink = document.querySelector('nav a[data-page="' + page + '"]');
   if (navLink) navLink.classList.add('active');
 
   if (page === 'history') loadHistory();
@@ -79,7 +109,6 @@ function toggleLeague(key) {
   document.querySelectorAll('.filter-chip').forEach((chip) => {
     chip.classList.toggle('active', activeLeagues.has(chip.dataset.league));
   });
-  // Filter client-side instead of re-fetching from API
   const filtered = eventsData.filter((e) => activeLeagues.has(e.league_key));
   renderEvents(filtered);
 }
@@ -99,6 +128,8 @@ function renderEvents(events) {
     heading.innerHTML = 'Upcoming Matches <span class="match-count">(' + events.length + ' &middot; updated ' + timeStr + ')</span>';
   }
 
+  container.innerHTML = '';
+
   // Custom match form
   const customForm = document.createElement('div');
   customForm.className = 'card';
@@ -112,34 +143,17 @@ function renderEvents(events) {
     '  <input type="text" id="custom-away" class="market-select" style="width: 180px" placeholder="e.g. Chelsea"></div>' +
     '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Date</label>' +
     '  <input type="date" id="custom-date" class="market-select" style="width: 150px"></div>' +
-    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Market</label>' +
-    '  <select class="market-select" id="custom-market">' +
-    '    <option value="goals">Goals</option><option value="corners">Corners</option><option value="cards">Cards</option>' +
-    '  </select></div>' +
-    '  <button class="btn btn-primary btn-sm" id="custom-analyze">Analyze</button>' +
-    '  <button class="btn btn-secondary btn-sm" id="custom-collect">Collect Only</button>' +
+    '  <button class="btn btn-primary btn-sm" id="custom-go">View Match</button>' +
     '</div>';
-  container.innerHTML = '';
   container.appendChild(customForm);
 
-  // Default date to today
   document.getElementById('custom-date').value = new Date().toISOString().slice(0, 10);
-
-  document.getElementById('custom-analyze').addEventListener('click', () => {
+  document.getElementById('custom-go').addEventListener('click', () => {
     const home = document.getElementById('custom-home').value.trim();
     const away = document.getElementById('custom-away').value.trim();
     const date = document.getElementById('custom-date').value.trim();
-    const market = document.getElementById('custom-market').value;
     if (!home || !away || !date) { showToast('Fill in all fields', 'error'); return; }
-    launchWithCacheCheck(home, away, date, market, true);
-  });
-  document.getElementById('custom-collect').addEventListener('click', () => {
-    const home = document.getElementById('custom-home').value.trim();
-    const away = document.getElementById('custom-away').value.trim();
-    const date = document.getElementById('custom-date').value.trim();
-    const market = document.getElementById('custom-market').value;
-    if (!home || !away || !date) { showToast('Fill in all fields', 'error'); return; }
-    launchWithCacheCheck(home, away, date, market, false);
+    openMatchPage({ home_team: home, away_team: away, commence_time: date + 'T00:00:00Z', league_key: '', league_label: 'Custom' });
   });
 
   // Events table
@@ -147,12 +161,14 @@ function renderEvents(events) {
   table.className = 'events-table';
 
   const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Market</th><th>Cached</th><th>Actions</th></tr>';
+  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Cached</th></tr>';
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
   events.forEach((e, idx) => {
     const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', () => openMatchPage(e));
 
     const date = new Date(e.commence_time);
     const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -186,20 +202,6 @@ function renderEvents(events) {
     tdLeague.appendChild(badge);
     tr.appendChild(tdLeague);
 
-    // Market select cell
-    const tdMarket = document.createElement('td');
-    const select = document.createElement('select');
-    select.className = 'market-select';
-    select.id = 'market-' + idx;
-    ['goals', 'corners', 'cards'].forEach((m) => {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m.charAt(0).toUpperCase() + m.slice(1);
-      select.appendChild(opt);
-    });
-    tdMarket.appendChild(select);
-    tr.appendChild(tdMarket);
-
     // Cache status cell
     const tdCache = document.createElement('td');
     tdCache.className = 'cache-cell';
@@ -207,27 +209,6 @@ function renderEvents(events) {
     tdCache.innerHTML = '<span class="cache-loading">...</span>';
     tr.appendChild(tdCache);
 
-    // Actions cell
-    const tdActions = document.createElement('td');
-    const btnAnalyze = document.createElement('button');
-    btnAnalyze.className = 'btn btn-primary btn-sm';
-    btnAnalyze.textContent = 'Analyze';
-    btnAnalyze.addEventListener('click', () => {
-      const market = select.value;
-      launchWithCacheCheck(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, true, btnAnalyze);
-    });
-
-    const btnCollect = document.createElement('button');
-    btnCollect.className = 'btn btn-secondary btn-sm';
-    btnCollect.textContent = 'Collect Only';
-    btnCollect.style.marginLeft = '6px';
-    btnCollect.addEventListener('click', () => {
-      const market = select.value;
-      launchWithCacheCheck(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, false, btnCollect);
-    });
-
-    tdActions.append(btnAnalyze, btnCollect);
-    tr.appendChild(tdActions);
     tbody.appendChild(tr);
   });
 
@@ -239,7 +220,6 @@ function renderEvents(events) {
 }
 
 async function loadCacheStatuses(events) {
-  // Deduplicate by match key to avoid redundant API calls
   const seen = new Set();
   const tasks = [];
   events.forEach((e, idx) => {
@@ -249,7 +229,6 @@ async function loadCacheStatuses(events) {
     tasks.push({ idx, e });
   });
 
-  // Fetch in parallel batches of 6
   for (let i = 0; i < tasks.length; i += 6) {
     const batch = tasks.slice(i, i + 6);
     await Promise.all(batch.map(async ({ idx, e }) => {
@@ -292,131 +271,273 @@ function renderCacheBadges(idx, markets) {
   }
 }
 
-// ── Analysis ────────────────────────────────────────────────────────────────
+// ── Match Info Page ─────────────────────────────────────────────────────────
 
-function launchWithCacheCheck(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
-  // First attempt without force — server returns cached results if available
-  startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn, false);
+function openMatchPage(event) {
+  currentMatch = {
+    home_team: event.home_team,
+    away_team: event.away_team,
+    date: event.commence_time.slice(0, 10),
+    commence_time: event.commence_time,
+    league_key: event.league_key || '',
+    league_label: event.league_label || '',
+  };
+  currentMarket = 'goals';
+  currentJobId = null;
+  tabCache = {};
+  showPage('match');
+  renderMatchPage();
 }
 
-async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn, force) {
-  if (triggerBtn) {
-    triggerBtn.disabled = true;
-    triggerBtn.classList.add('loading');
+async function renderMatchPage() {
+  const container = document.getElementById('match-container');
+  container.innerHTML = '';
+
+  const m = currentMatch;
+  const date = new Date(m.commence_time);
+  const dateStr = date.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+  // Back link
+  const back = document.createElement('a');
+  back.href = '#';
+  back.className = 'back-link';
+  back.textContent = '\u2190 Back to matches';
+  back.addEventListener('click', (e) => { e.preventDefault(); showPage('matches'); });
+  container.appendChild(back);
+
+  // Match info card
+  const infoCard = document.createElement('div');
+  infoCard.className = 'match-info-card';
+  infoCard.innerHTML =
+    '<div class="match-info-teams">' +
+    '  <span class="match-info-team">' + esc(m.home_team) + '</span>' +
+    '  <span class="match-info-vs">vs</span>' +
+    '  <span class="match-info-team">' + esc(m.away_team) + '</span>' +
+    '</div>' +
+    '<div class="match-info-details">' +
+    '  <span>' + esc(dateStr) + (timeStr !== '00:00' ? ' &middot; ' + esc(timeStr) : '') + '</span>' +
+    (m.league_label ? '  <span class="league-badge" data-league="' + esc(m.league_key) + '">' + esc(m.league_label) + '</span>' : '') +
+    '</div>';
+  container.appendChild(infoCard);
+
+  // Market tabs + action buttons
+  const toolbar = document.createElement('div');
+  toolbar.className = 'match-toolbar';
+
+  const marketTabs = document.createElement('div');
+  marketTabs.className = 'market-tabs';
+  ['goals', 'corners', 'cards'].forEach((mk) => {
+    const tab = document.createElement('button');
+    tab.className = 'market-tab' + (mk === currentMarket ? ' active' : '');
+    tab.textContent = mk.charAt(0).toUpperCase() + mk.slice(1);
+    tab.addEventListener('click', () => switchMarket(mk));
+    marketTabs.appendChild(tab);
+  });
+  toolbar.appendChild(marketTabs);
+
+  // Action buttons (admin only)
+  if (isAdmin()) {
+    const actions = document.createElement('div');
+    actions.className = 'match-actions';
+    actions.id = 'match-actions';
+
+    const collectBtn = document.createElement('button');
+    collectBtn.className = 'btn btn-secondary btn-sm';
+    collectBtn.id = 'btn-collect';
+    collectBtn.textContent = 'Collect Data';
+    collectBtn.addEventListener('click', () => launchJob(false));
+
+    const analyzeBtn = document.createElement('button');
+    analyzeBtn.className = 'btn btn-primary btn-sm';
+    analyzeBtn.id = 'btn-analyze';
+    analyzeBtn.textContent = 'Analyze';
+    analyzeBtn.addEventListener('click', () => launchJob(true));
+
+    actions.append(collectBtn, analyzeBtn);
+    toolbar.appendChild(actions);
   }
+
+  container.appendChild(toolbar);
+
+  // Job progress area (steps bar + logs)
+  const progressArea = document.createElement('div');
+  progressArea.id = 'match-progress';
+  container.appendChild(progressArea);
+
+  // Results area
+  const resultsArea = document.createElement('div');
+  resultsArea.id = 'match-results';
+  container.appendChild(resultsArea);
+
+  // Load cache status for current market
+  loadMarketData();
+}
+
+function switchMarket(market) {
+  currentMarket = market;
+
+  // Clean up any running job tracking
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  currentJobId = null;
+  tabCache = {};
+
+  // Update active tab
+  document.querySelectorAll('.market-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.textContent.toLowerCase() === market);
+  });
+
+  // Reset progress and results
+  document.getElementById('match-progress').innerHTML = '';
+  document.getElementById('match-results').innerHTML = '';
+
+  // Re-enable action buttons
+  const collectBtn = document.getElementById('btn-collect');
+  const analyzeBtn = document.getElementById('btn-analyze');
+  if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
+  if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
+
+  loadMarketData();
+}
+
+async function loadMarketData() {
+  const resultsArea = document.getElementById('match-results');
+  if (!currentMatch) return;
+
+  const m = currentMatch;
+
+  // Check if cached data exists for this market
+  try {
+    const params = new URLSearchParams({
+      homeTeam: m.home_team,
+      awayTeam: m.away_team,
+      date: m.date,
+    });
+    const resp = await fetch('/api/cache-status?' + params);
+    const data = await resp.json();
+    const marketInfo = (data.markets || {})[currentMarket];
+
+    if (marketInfo && (marketInfo.hasReport || marketInfo.hasAnalysis)) {
+      // Load cached results by creating a temp job that references cached files
+      const jobResp = await fetch('/api/analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          homeTeam: m.home_team,
+          awayTeam: m.away_team,
+          date: m.date,
+          market: currentMarket,
+          analyze: false,
+          force: false,
+        }),
+      });
+      const jobData = await jobResp.json();
+
+      if (jobData.cached && jobData.jobId) {
+        currentJobId = jobData.jobId;
+        renderCachedResults(jobData.jobId, marketInfo.hasAnalysis);
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // No cached data
+  resultsArea.innerHTML = '<div class="empty-state"><p>No data collected yet for ' + currentMarket + ' market.</p></div>';
+}
+
+async function renderCachedResults(jobId, hasAnalysis) {
+  const resultsArea = document.getElementById('match-results');
+  resultsArea.innerHTML = '';
+
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+
+  const tabDefs = hasAnalysis
+    ? [
+        { key: 'concise', label: 'Value Picks' },
+        { key: 'analysis', label: 'Full Analysis' },
+        { key: 'raw', label: 'Data Report' },
+      ]
+    : [{ key: 'raw', label: 'Data Report' }];
+
+  tabDefs.forEach((t, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (i === 0 ? ' active' : '');
+    btn.textContent = t.label;
+    btn.addEventListener('click', () => {
+      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadTabContent(jobId, t.key);
+    });
+    tabs.appendChild(btn);
+  });
+
+  const content = document.createElement('div');
+  content.id = 'tab-content-' + jobId;
+
+  resultsArea.append(tabs, content);
+  await loadTabContent(jobId, tabDefs[0].key);
+}
+
+// ── Job launch + progress ───────────────────────────────────────────────────
+
+function launchJob(analyze) {
+  if (!currentMatch) return;
+  const m = currentMatch;
+
+  // Check if there's an existing running job for this market
+  if (currentJobId && eventSource) {
+    showToast('A job is already running for this market', 'error');
+    return;
+  }
+
+  startJob(m.home_team, m.away_team, m.date, currentMarket, analyze);
+}
+
+async function startJob(homeTeam, awayTeam, date, market, analyze) {
+  const collectBtn = document.getElementById('btn-collect');
+  const analyzeBtn = document.getElementById('btn-analyze');
+  if (collectBtn) { collectBtn.disabled = true; collectBtn.classList.add('loading'); }
+  if (analyzeBtn) { analyzeBtn.disabled = true; analyzeBtn.classList.add('loading'); }
+
   try {
     const resp = await fetch('/api/analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze, force: !!force }),
+      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze, force: true }),
     });
     const data = await resp.json();
 
     if (data.error) {
       showToast(data.error, 'error');
-      return;
-    }
-
-    currentJobParams = { homeTeam, awayTeam, date, market };
-
-    // Cached results found on disk — show them immediately
-    if (data.cached) {
-      currentJobId = data.jobId;
-      showPage('results');
-      renderJobProgress(data.jobId, homeTeam, awayTeam, date, market, true, true);
-      appendLog(data.jobId, 'Loaded from cached results');
-      updateJobStatus(data.jobId, 'complete', null);
-      renderResults(data.jobId);
+      if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
+      if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
       return;
     }
 
     currentJobId = data.jobId;
-    showPage('results');
-    renderJobProgress(data.jobId, homeTeam, awayTeam, date, market);
+    tabCache = {};
 
-    if (data.duplicate) {
-      appendLog(data.jobId, 'Reconnecting to existing job...');
+    if (data.cached) {
+      if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
+      if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
+      renderCachedResults(data.jobId, true);
+      return;
     }
 
+    renderJobProgress(data.jobId);
     connectSSE(data.jobId);
   } catch (err) {
     showToast('Failed to start: ' + err.message, 'error');
-  } finally {
-    if (triggerBtn) {
-      triggerBtn.disabled = false;
-      triggerBtn.classList.remove('loading');
-    }
+    if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
+    if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
   }
 }
 
-let elapsedTimer = null;
-let tabCache = {}; // Cache loaded tab HTML by jobId:tabKey
-let currentJobParams = null; // { homeTeam, awayTeam, date, market } for re-run
-
-function renderJobProgress(jobId, home, away, date, market, skipTimer, isCached) {
-  const container = document.getElementById('results-container');
-  const marketLabel = market.charAt(0).toUpperCase() + market.slice(1);
-
-  container.innerHTML = '';
-  tabCache = {};
-
-  // Top bar: back link + re-run button
-  const topBar = document.createElement('div');
-  topBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
-
-  const backLink = document.createElement('a');
-  backLink.href = '#';
-  backLink.style.cssText = 'font-size: 13px; color: var(--text-dim); text-decoration: none;';
-  backLink.textContent = '\u2190 Back to matches';
-  backLink.addEventListener('click', (e) => { e.preventDefault(); showPage('matches'); });
-  topBar.appendChild(backLink);
-
-  if (isCached) {
-    const rerunBtn = document.createElement('button');
-    rerunBtn.className = 'btn btn-secondary btn-sm';
-    rerunBtn.textContent = 'Re-run Pipeline';
-    rerunBtn.addEventListener('click', () => {
-      if (!currentJobParams) return;
-      if (!confirm('Cached results already exist for this match.\n\nRe-run the full pipeline? This will overwrite existing results.')) return;
-      const p = currentJobParams;
-      startJob(p.homeTeam, p.awayTeam, p.date, p.market, true, rerunBtn, true);
-    });
-    topBar.appendChild(rerunBtn);
-  }
-
-  container.appendChild(topBar);
-
-  const card = document.createElement('div');
-  card.className = 'job-card';
-  card.id = 'job-' + jobId;
-
-  const header = document.createElement('div');
-  header.className = 'job-header';
-
-  const info = document.createElement('div');
-  const title = document.createElement('div');
-  title.className = 'job-title';
-  title.textContent = home + ' vs ' + away;
-  const meta = document.createElement('div');
-  meta.style.cssText = 'font-size: 12px; color: var(--text-dim); margin-top: 2px';
-  meta.textContent = date + ' \u00B7 ' + marketLabel + ' market';
-  info.append(title, meta);
-
-  const statusArea = document.createElement('div');
-  statusArea.style.cssText = 'display: flex; align-items: center; gap: 12px';
-
-  const elapsed = document.createElement('span');
-  elapsed.id = 'job-elapsed-' + jobId;
-  elapsed.style.cssText = 'font-size: 12px; color: var(--text-dim); font-family: var(--mono)';
-  elapsed.textContent = '0s';
-
-  const status = document.createElement('span');
-  status.className = 'job-status status-pending';
-  status.id = 'job-status-' + jobId;
-  status.innerHTML = '<span class="spinner"></span> Pending';
-
-  statusArea.append(elapsed, status);
-  header.append(info, statusArea);
+function renderJobProgress(jobId) {
+  const progressArea = document.getElementById('match-progress');
+  progressArea.innerHTML = '';
 
   // Step progress bar
   const stepsBar = document.createElement('div');
@@ -428,19 +549,37 @@ function renderJobProgress(jobId, home, away, date, market, skipTimer, isCached)
     step.textContent = label;
     stepsBar.appendChild(step);
   });
+  progressArea.appendChild(stepsBar);
 
-  // Collapsible log toggle
+  // Status + elapsed
+  const statusRow = document.createElement('div');
+  statusRow.style.cssText = 'display: flex; align-items: center; gap: 12px; margin: 8px 0';
+
+  const status = document.createElement('span');
+  status.className = 'job-status status-pending';
+  status.id = 'job-status-' + jobId;
+  status.innerHTML = '<span class="spinner"></span> Pending';
+
+  const elapsed = document.createElement('span');
+  elapsed.id = 'job-elapsed-' + jobId;
+  elapsed.style.cssText = 'font-size: 12px; color: var(--text-dim); font-family: var(--mono)';
+  elapsed.textContent = '0s';
+
+  statusRow.append(status, elapsed);
+  progressArea.appendChild(statusRow);
+
+  // Collapsible log panel
   const logToggle = document.createElement('div');
   logToggle.className = 'log-toggle';
   const arrow = document.createElement('span');
-  arrow.className = 'arrow' + (isCached ? '' : ' open');
+  arrow.className = 'arrow open';
   arrow.textContent = '\u25B6';
   const toggleLabel = document.createElement('span');
   toggleLabel.textContent = 'Pipeline Logs';
   logToggle.append(arrow, toggleLabel);
 
   const log = document.createElement('div');
-  log.className = 'progress-log' + (isCached ? ' collapsed' : '');
+  log.className = 'progress-log';
   log.id = 'job-log-' + jobId;
 
   logToggle.addEventListener('click', () => {
@@ -448,34 +587,23 @@ function renderJobProgress(jobId, home, away, date, market, skipTimer, isCached)
     arrow.classList.toggle('open');
   });
 
-  const results = document.createElement('div');
-  results.id = 'job-results-' + jobId;
-  results.style.marginTop = '16px';
+  progressArea.append(logToggle, log);
 
-  card.append(header, stepsBar, logToggle, log, results);
-  container.appendChild(card);
-
-  // Start elapsed timer (skip when viewing historical jobs)
+  // Start elapsed timer
   if (elapsedTimer) clearInterval(elapsedTimer);
-  if (!skipTimer) {
-    const startTime = Date.now();
-    elapsedTimer = setInterval(() => {
-      const secs = Math.round((Date.now() - startTime) / 1000);
-      const el = document.getElementById('job-elapsed-' + jobId);
-      if (el) {
-        if (secs < 60) el.textContent = secs + 's';
-        else el.textContent = Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
-      }
-    }, 1000);
-  } else {
-    elapsed.textContent = '';
-  }
+  const startTime = Date.now();
+  elapsedTimer = setInterval(() => {
+    const secs = Math.round((Date.now() - startTime) / 1000);
+    const el = document.getElementById('job-elapsed-' + jobId);
+    if (el) {
+      if (secs < 60) el.textContent = secs + 's';
+      else el.textContent = Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+    }
+  }, 1000);
 }
 
 function connectSSE(jobId) {
-  if (eventSource) {
-    eventSource.close();
-  }
+  if (eventSource) eventSource.close();
 
   eventSource = new EventSource('/api/analysis/' + jobId + '/stream');
 
@@ -494,14 +622,18 @@ function connectSSE(jobId) {
     eventSource = null;
     updateJobStatus(jobId, 'complete', 'Complete!');
     showToast('Analysis complete!', 'success');
-    renderResults(jobId).then(() => {
-      const el = document.getElementById('job-results-' + jobId);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+
+    // Re-enable buttons
+    const collectBtn = document.getElementById('btn-collect');
+    const analyzeBtn = document.getElementById('btn-analyze');
+    if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
+    if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
+
+    // Load results
+    loadMarketData();
   });
 
   eventSource.addEventListener('error', (e) => {
-    // Custom application-level error (has data) — close permanently
     if (e.data) {
       try {
         const data = JSON.parse(e.data);
@@ -510,10 +642,13 @@ function connectSSE(jobId) {
       } catch (_) {}
       eventSource.close();
       eventSource = null;
+
+      const collectBtn = document.getElementById('btn-collect');
+      const analyzeBtn = document.getElementById('btn-analyze');
+      if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
+      if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
       return;
     }
-    // Native SSE connection error — browser auto-reconnects if readyState != CLOSED
-    // Only close if EventSource gave up (readyState === CLOSED)
     if (eventSource.readyState === EventSource.CLOSED) {
       appendLog(jobId, 'Connection lost');
       eventSource = null;
@@ -535,8 +670,8 @@ function updateJobStatus(jobId, status, message) {
   };
 
   const steps = ['collecting', 'collected', 'analyzing', 'complete'];
-
   const spinnerStatuses = ['pending', 'collecting', 'analyzing'];
+
   el.className = 'job-status status-' + status;
   el.innerHTML = '';
   if (spinnerStatuses.includes(status)) {
@@ -577,57 +712,13 @@ function appendLog(jobId, message) {
   log.scrollTop = log.scrollHeight;
 }
 
-// ── Results rendering ───────────────────────────────────────────────────────
-
-async function renderResults(jobId) {
-  const resultsEl = document.getElementById('job-results-' + jobId);
-  if (!resultsEl) return;
-
-  // Fetch job details to determine available tabs
-  let hasAnalysis = false;
-  try {
-    const resp = await fetch('/api/analysis/' + jobId);
-    const job = await resp.json();
-    hasAnalysis = !!job.hasAnalysis;
-  } catch (_) {}
-
-  resultsEl.innerHTML = '';
-
-  const tabs = document.createElement('div');
-  tabs.className = 'tabs';
-
-  const tabDefs = hasAnalysis
-    ? [
-        { key: 'concise', label: 'Value Picks' },
-        { key: 'analysis', label: 'Full Analysis' },
-        { key: 'raw', label: 'Data Report' },
-      ]
-    : [{ key: 'raw', label: 'Data Report' }];
-
-  tabDefs.forEach((t, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab' + (i === 0 ? ' active' : '');
-    btn.textContent = t.label;
-    btn.addEventListener('click', () => {
-      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadTabContent(jobId, t.key);
-    });
-    tabs.appendChild(btn);
-  });
-
-  const content = document.createElement('div');
-  content.id = 'tab-content-' + jobId;
-
-  resultsEl.append(tabs, content);
-  await loadTabContent(jobId, tabDefs[0].key);
-}
+// ── Tab content loading ─────────────────────────────────────────────────────
 
 async function loadTabContent(jobId, tab) {
   const container = document.getElementById('tab-content-' + jobId);
+  if (!container) return;
   const cacheKey = jobId + ':' + tab;
 
-  // Serve from cache if available
   if (tabCache[cacheKey]) {
     container.innerHTML = '';
     const body = document.createElement('div');
@@ -644,13 +735,7 @@ async function loadTabContent(jobId, tab) {
     const data = await resp.json();
 
     if (data.error) {
-      container.innerHTML = '';
-      const msg = document.createElement('div');
-      msg.className = 'empty-state';
-      const p = document.createElement('p');
-      p.textContent = data.error;
-      msg.appendChild(p);
-      container.appendChild(msg);
+      container.innerHTML = '<div class="empty-state"><p>' + esc(data.error) + '</p></div>';
       return;
     }
 
@@ -661,13 +746,7 @@ async function loadTabContent(jobId, tab) {
     body.innerHTML = data.html;
     container.appendChild(body);
   } catch (err) {
-    container.innerHTML = '';
-    const msg = document.createElement('div');
-    msg.className = 'empty-state';
-    const p = document.createElement('p');
-    p.textContent = 'Failed to load: ' + err.message;
-    msg.appendChild(p);
-    container.appendChild(msg);
+    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
   }
 }
 
@@ -683,7 +762,7 @@ async function loadHistory() {
     const jobs = data.jobs || [];
 
     if (jobs.length === 0) {
-      container.innerHTML = '<div class="empty-state"><h3>No analyses yet</h3><p>Run your first analysis from the Matches page.</p></div>';
+      container.innerHTML = '<div class="empty-state"><h3>No analyses yet</h3><p>Run your first analysis from a match page.</p></div>';
       return;
     }
 
@@ -693,7 +772,16 @@ async function loadHistory() {
     jobs.forEach((job) => {
       const item = document.createElement('div');
       item.className = 'history-item';
-      item.addEventListener('click', () => viewJob(job.id));
+      item.addEventListener('click', () => {
+        // Navigate to match info page for this job's match
+        openMatchPage({
+          home_team: job.homeTeam,
+          away_team: job.awayTeam,
+          commence_time: job.date + 'T00:00:00Z',
+          league_key: '',
+          league_label: '',
+        });
+      });
 
       const info = document.createElement('div');
       info.className = 'history-info';
@@ -722,45 +810,7 @@ async function loadHistory() {
     container.innerHTML = '';
     container.appendChild(card);
   } catch (err) {
-    container.innerHTML = '';
-    const msg = document.createElement('div');
-    msg.className = 'empty-state';
-    const p = document.createElement('p');
-    p.textContent = 'Failed to load: ' + err.message;
-    msg.appendChild(p);
-    container.appendChild(msg);
-  }
-}
-
-async function viewJob(jobId) {
-  try {
-    const resp = await fetch('/api/analysis/' + jobId);
-    const job = await resp.json();
-
-    if (job.error && !job.id) {
-      showToast(job.error, 'error');
-      return;
-    }
-
-    currentJobId = jobId;
-    currentJobParams = { homeTeam: job.homeTeam, awayTeam: job.awayTeam, date: job.date, market: job.market };
-    showPage('results');
-    const isCached = job.status === 'complete';
-    renderJobProgress(jobId, job.homeTeam, job.awayTeam, job.date, job.market, true, isCached);
-
-    // Replay logs
-    (job.logs || []).forEach((log) => appendLog(jobId, log.message));
-    updateJobStatus(jobId, job.status, null);
-
-    if (job.status === 'complete') {
-      renderResults(jobId);
-    } else if (job.status === 'failed') {
-      appendLog(jobId, 'ERROR: ' + (job.error || 'Unknown error'));
-    } else {
-      connectSSE(jobId);
-    }
-  } catch (err) {
-    showToast('Failed to load job: ' + err.message, 'error');
+    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
   }
 }
 
@@ -773,7 +823,6 @@ function esc(s) {
   return div.innerHTML;
 }
 
-// Toast notification system
 function showToast(message, type) {
   let container = document.querySelector('.toast-container');
   if (!container) {
@@ -794,15 +843,15 @@ function showToast(message, type) {
 
 // ── Init ────────────────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadUser();
   loadEvents();
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    // Escape: go back to matches from results page
     if (e.key === 'Escape') {
-      const resultsPage = document.getElementById('page-results');
-      if (resultsPage && resultsPage.classList.contains('active')) {
+      const matchPage = document.getElementById('page-match');
+      if (matchPage && matchPage.classList.contains('active')) {
         showPage('matches');
       }
     }

@@ -5,13 +5,6 @@
 
 // ── Raw Odds API response shapes ──────────────────────────────────────────────
 
-export interface OddsSport {
-  key: string;
-  title: string;
-  active: boolean;
-  has_outrights: boolean;
-}
-
 export interface OddsEvent {
   id: string;
   sport_key: string;
@@ -65,6 +58,3 @@ export interface MatchOdds {
   awayTeam?: string;
   markets: MarketGroup[];
 }
-
-/** @deprecated Use MarketGroup instead */
-export type CornerMarket = MarketGroup;

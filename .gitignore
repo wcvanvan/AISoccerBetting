@@ -9,3 +9,10 @@ __pycache__/
 .cache/
 src/cache/data/
 data/reports/
+# ad-hoc analysis outputs and scratch scripts in project root
+*.md
+!README.md
+!AGENTS.md
+poisson_calc.py
+.goal-stash/
+.vscode/

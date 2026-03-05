@@ -38,19 +38,6 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Date must be in ISO format (YYYY-MM-DD)' };
     }
 
-    // Check for duplicate: same teams + date + market, still running
-    const existing = jobManager.getAll().find(
-      (j) =>
-        j.homeTeam === homeTeam &&
-        j.awayTeam === awayTeam &&
-        j.date === date &&
-        j.market === market &&
-        !['complete', 'failed'].includes(j.status)
-    );
-    if (existing) {
-      return { jobId: existing.id, status: existing.status, duplicate: true };
-    }
-
     // Check for cached results on disk (unless force re-run)
     if (!body.force) {
       const cached = getCachedPaths(homeTeam, awayTeam, date, market);
@@ -69,6 +56,25 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
           hasAnalysis: !!cached.analysisPath,
         };
       }
+    }
+
+    // Beyond cache lookup, write operations require admin role
+    if (request.user?.role !== 'admin') {
+      reply.status(403);
+      return { error: 'Read-only access. Only admin can run analyses.' };
+    }
+
+    // Check for duplicate: same teams + date + market, still running
+    const existing = jobManager.getAll().find(
+      (j) =>
+        j.homeTeam === homeTeam &&
+        j.awayTeam === awayTeam &&
+        j.date === date &&
+        j.market === market &&
+        !['complete', 'failed'].includes(j.status)
+    );
+    if (existing) {
+      return { jobId: existing.id, status: existing.status, duplicate: true };
     }
 
     const analyze = body.analyze !== false;

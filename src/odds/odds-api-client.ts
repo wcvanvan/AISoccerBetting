@@ -5,8 +5,7 @@
  * Auth: ?apiKey=... query parameter
  */
 
-import { OddsSport, OddsEvent, OddsEventOddsResponse } from './types';
-import { configureAnthropicProxy } from '../agent/configure-proxy';
+import { OddsEvent, OddsEventOddsResponse } from './types';
 
 const BASE_URL = 'https://api.the-odds-api.com/v4';
 
@@ -15,12 +14,6 @@ export class OddsApiClient {
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    configureAnthropicProxy();
-  }
-
-  /** Returns all active sports. */
-  async getSports(): Promise<OddsSport[]> {
-    return this.get<OddsSport[]>('/sports');
   }
 
   /** Returns upcoming events for a sport. */

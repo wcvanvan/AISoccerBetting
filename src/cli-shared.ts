@@ -166,11 +166,11 @@ Prerequisites:
 
 // ── Filename helpers ────────────────────────────────────────────────────────
 
-function slug(s: string): string {
+export function slug(s: string): string {
   return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
-function buildReportFilename(teamA: string, teamB: string, date: string, market: string): string {
+export function buildReportFilename(teamA: string, teamB: string, date: string, market: string): string {
   return `${slug(teamA)}-vs-${slug(teamB)}-${date}-${market}.md`;
 }
 

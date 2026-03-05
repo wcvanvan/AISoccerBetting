@@ -14,9 +14,12 @@
       <a href="#" class="logo" onclick="showPage('matches')">Soccer<span>Bet</span></a>
       <nav>
         <a href="#" class="active" data-page="matches" onclick="showPage('matches')">Matches</a>
-        <a href="#" data-page="results" onclick="showPage('results')">Results</a>
         <a href="#" data-page="history" onclick="showPage('history')">History</a>
       </nav>
+      <div class="header-right">
+        <span class="user-badge" id="user-badge"></span>
+        <button class="btn btn-secondary btn-sm" id="logout-btn" onclick="logout()">Sign Out</button>
+      </div>
     </div>
   </header>
 
@@ -36,14 +39,9 @@
         </div>
       </div>
 
-      <!-- Results Page -->
-      <div id="page-results" class="page">
-        <div id="results-container">
-          <div class="empty-state">
-            <h3>No active analysis</h3>
-            <p>Select a match and click "Analyze" to get started.</p>
-          </div>
-        </div>
+      <!-- Match Info Page -->
+      <div id="page-match" class="page">
+        <div id="match-container"></div>
       </div>
 
       <!-- History Page -->
@@ -52,7 +50,7 @@
         <div id="history-container">
           <div class="empty-state">
             <h3>No analyses yet</h3>
-            <p>Run your first analysis from the Matches page.</p>
+            <p>Run your first analysis from a match page.</p>
           </div>
         </div>
       </div>

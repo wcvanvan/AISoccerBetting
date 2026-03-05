@@ -17,6 +17,7 @@ import {
   MarketConfig,
 } from '../../odds';
 import { FormatOptions } from '../../formatter';
+import { buildReportFilename } from '../../cli-shared';
 import { jobManager, Job, MarketType } from './job-manager';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
@@ -49,19 +50,6 @@ const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
     marketLabel: 'card',
   },
 };
-
-function slug(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-}
-
-function buildReportFilename(
-  teamA: string,
-  teamB: string,
-  date: string,
-  toolName: string
-): string {
-  return `${slug(teamA)}-vs-${slug(teamB)}-${date}-${toolName}.md`;
-}
 
 /** Check if cached report/analysis files exist on disk for a given match+market. */
 export function getCachedPaths(
