@@ -7,6 +7,11 @@ import { FastifyInstance } from 'fastify';
 import { marked } from 'marked';
 import { jobManager } from '../services/job-manager';
 
+/** Wrap <table> elements in a scrollable container for wide data tables */
+function wrapTables(html: string): string {
+  return html.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>');
+}
+
 export async function reportsRoutes(app: FastifyInstance): Promise<void> {
   /** Get the raw data report as rendered HTML */
   app.get('/api/reports/:id/raw', async (request, reply) => {
@@ -24,7 +29,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const markdown = fs.readFileSync(job.reportPath, 'utf8');
-    const html = await marked(markdown);
+    const html = wrapTables(await marked(markdown));
     return { html, markdown };
   });
 
@@ -44,7 +49,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const markdown = fs.readFileSync(job.analysisPath, 'utf8');
-    const html = await marked(markdown);
+    const html = wrapTables(await marked(markdown));
     return { html, markdown };
   });
 
@@ -65,7 +70,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
 
     const markdown = fs.readFileSync(job.analysisPath, 'utf8');
     const concise = extractValuePicks(markdown);
-    const html = await marked(concise);
+    const html = wrapTables(await marked(concise));
     return { html, markdown: concise };
   });
 }

@@ -26,6 +26,15 @@ async function main() {
     app.log.error(err);
     process.exit(1);
   }
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log('\nShutting down...');
+    await app.close();
+    process.exit(0);
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 main();

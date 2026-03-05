@@ -166,6 +166,26 @@ main { padding: 24px 0; }
   color: var(--text-dim);
 }
 
+.league-badge[data-league="soccer_epl"] {
+  background: rgba(106, 27, 154, 0.18);
+  color: #ce93d8;
+}
+
+.league-badge[data-league="soccer_uefa_champs_league"] {
+  background: rgba(25, 118, 210, 0.18);
+  color: #64b5f6;
+}
+
+.league-badge[data-league="soccer_germany_bundesliga"] {
+  background: rgba(211, 47, 47, 0.18);
+  color: #ef9a9a;
+}
+
+.league-badge[data-league="soccer_spain_la_liga"] {
+  background: rgba(245, 124, 0, 0.18);
+  color: #ffb74d;
+}
+
 .match-date {
   font-size: 13px;
   color: var(--text-dim);
@@ -358,11 +378,16 @@ main { padding: 24px 0; }
 .markdown-body li { margin: 4px 0; }
 .markdown-body strong { color: var(--text); }
 
+.markdown-body .table-wrap {
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
 .markdown-body table {
   width: 100%;
   border-collapse: collapse;
-  margin: 12px 0;
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .markdown-body th {

@@ -79,7 +79,13 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const send = (event: string, data: unknown) => {
-      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      try {
+        if (!reply.raw.destroyed) {
+          reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+      } catch {
+        // Connection closed — ignore broken pipe
+      }
     };
 
     // Send current state
@@ -137,7 +143,17 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
 
     // Heartbeat to keep connection alive
     const heartbeat = setInterval(() => {
-      reply.raw.write(': heartbeat\n\n');
+      try {
+        if (!reply.raw.destroyed) {
+          reply.raw.write(': heartbeat\n\n');
+        } else {
+          clearInterval(heartbeat);
+          cleanup();
+        }
+      } catch {
+        clearInterval(heartbeat);
+        cleanup();
+      }
     }, 15000);
 
     request.raw.on('close', () => {

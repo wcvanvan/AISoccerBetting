@@ -170,6 +170,7 @@ function renderEvents(events) {
     const tdLeague = document.createElement('td');
     const badge = document.createElement('span');
     badge.className = 'league-badge';
+    badge.dataset.league = e.league_key;
     badge.textContent = e.league_label;
     tdLeague.appendChild(badge);
     tr.appendChild(tdLeague);
@@ -247,7 +248,7 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
 
 let elapsedTimer = null;
 
-function renderJobProgress(jobId, home, away, date, market) {
+function renderJobProgress(jobId, home, away, date, market, skipTimer) {
   const container = document.getElementById('results-container');
   const marketLabel = market.charAt(0).toUpperCase() + market.slice(1);
 
@@ -304,17 +305,21 @@ function renderJobProgress(jobId, home, away, date, market) {
   card.append(header, log, results);
   container.appendChild(card);
 
-  // Start elapsed timer
+  // Start elapsed timer (skip when viewing historical jobs)
   if (elapsedTimer) clearInterval(elapsedTimer);
-  const startTime = Date.now();
-  elapsedTimer = setInterval(() => {
-    const secs = Math.round((Date.now() - startTime) / 1000);
-    const el = document.getElementById('job-elapsed-' + jobId);
-    if (el) {
-      if (secs < 60) el.textContent = secs + 's';
-      else el.textContent = Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
-    }
-  }, 1000);
+  if (!skipTimer) {
+    const startTime = Date.now();
+    elapsedTimer = setInterval(() => {
+      const secs = Math.round((Date.now() - startTime) / 1000);
+      const el = document.getElementById('job-elapsed-' + jobId);
+      if (el) {
+        if (secs < 60) el.textContent = secs + 's';
+        else el.textContent = Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+      }
+    }, 1000);
+  } else {
+    elapsed.textContent = '';
+  }
 }
 
 function connectSSE(jobId) {
@@ -552,7 +557,7 @@ async function viewJob(jobId) {
 
     currentJobId = jobId;
     showPage('results');
-    renderJobProgress(jobId, job.homeTeam, job.awayTeam, job.date, job.market);
+    renderJobProgress(jobId, job.homeTeam, job.awayTeam, job.date, job.market, true);
 
     // Replay logs
     (job.logs || []).forEach((log) => appendLog(jobId, log.message));

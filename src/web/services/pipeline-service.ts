@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
 
+import { configureAnthropicProxy } from '../../agent/configure-proxy';
 import { MatchDataCollector } from '../../collector';
 import { SoccerdataProvider } from '../../provider';
 import {
@@ -67,6 +68,8 @@ export async function runPipelineForJob(
   job: Job,
   analyze: boolean
 ): Promise<void> {
+  configureAnthropicProxy();
+
   if (!fs.existsSync(REPORTS_DIR)) {
     fs.mkdirSync(REPORTS_DIR, { recursive: true });
   }
@@ -143,17 +146,22 @@ async function runAnalysis(job: Job): Promise<void> {
 
   const config = MARKET_CONFIGS[job.market];
   const analysisPath = job.reportPath!.replace(/\.md$/, '-analysis.md');
+  const reportContent = fs.readFileSync(job.reportPath!, 'utf8');
 
-  // Build the prompt referencing the file path — avoid inlining large report content in CLI args
+  // Pipe full report content via stdin since --print mode cannot access local files
   const prompt = [
-    `You are a soccer betting analyst. Read the match data report at:`,
-    `${job.reportPath}`,
+    `You are a professional soccer betting analyst specializing in ${config.marketLabel} markets.`,
+    `Analyze the following match data report and produce a comprehensive betting analysis.`,
+    `Focus on identifying value bets with clear statistical reasoning.`,
+    `Structure your output with these sections:`,
+    `- Statistical Analysis (key metrics, trends)`,
+    `- Predictions (expected outcomes with probabilities)`,
+    `- Value Picks (specific bets with edge calculations)`,
+    `- Bets to Avoid`,
     ``,
-    `Write a comprehensive ${config.marketLabel} market betting analysis.`,
-    `Focus on identifying value bets with clear reasoning.`,
-    `Include a "## Recommended Bets" section at the end with your top picks.`,
+    `Here is the match data report:`,
     ``,
-    `Save the analysis directly to: ${analysisPath}`,
+    reportContent,
   ].join('\n');
 
   return new Promise<void>((resolve, reject) => {
