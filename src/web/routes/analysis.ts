@@ -273,6 +273,20 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
 
   /** List all jobs */
   app.get('/api/jobs', async () => {
-    return { jobs: jobManager.getAll() };
+    const jobs = jobManager.getAll().map((j) => ({
+      id: j.id,
+      homeTeam: j.homeTeam,
+      awayTeam: j.awayTeam,
+      date: j.date,
+      market: j.market,
+      status: j.status,
+      error: j.error,
+      logs: j.logs,
+      hasReport: !!j.reportPath,
+      hasAnalysis: !!j.analysisPath,
+      createdAt: j.createdAt,
+      updatedAt: j.updatedAt,
+    }));
+    return { jobs };
   });
 }

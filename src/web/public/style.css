@@ -581,22 +581,95 @@ input[type="text"].market-select::placeholder {
 }
 
 /* ── History list ───────────────────────────────────────────────────────── */
-.history-item {
+.history-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.history-card:hover {
+  border-color: var(--text-dim);
+  background: var(--bg-hover);
+}
+
+.history-top-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  cursor: pointer;
-  transition: background 0.1s;
+  margin-bottom: 8px;
 }
 
-.history-item:last-child { border-bottom: none; }
-.history-item:hover { background: var(--bg-hover); }
+.history-teams { font-weight: 600; font-size: 14px; }
 
-.history-info { flex: 1; }
-.history-teams { font-weight: 600; font-size: 13px; }
-.history-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; font-family: var(--mono); }
+.history-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.history-detail {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+.history-market {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-label);
+}
+
+.history-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.2px;
+}
+
+.history-badge.badge-report {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.history-badge.badge-analysis {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.history-duration {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.history-time-row {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+.history-error {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--red);
+  background: var(--red-dim);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  word-break: break-word;
+}
 
 /* ── Page views ─────────────────────────────────────────────────────────── */
 .page { display: none; }

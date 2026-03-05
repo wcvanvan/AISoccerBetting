@@ -47,9 +47,7 @@ function isAdmin() {
 // ── Page navigation ─────────────────────────────────────────────────────────
 
 function showPage(page) {
-  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
-  if (eventSource) { eventSource.close(); eventSource = null; }
-
+  // Don't kill SSE/timer when navigating away — preserve running job state
   document.querySelectorAll('.page').forEach((el) => el.classList.remove('active'));
   document.querySelectorAll('nav a').forEach((el) => el.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
@@ -274,6 +272,20 @@ function renderCacheBadges(idx, markets) {
 // ── Match Info Page ─────────────────────────────────────────────────────────
 
 function openMatchPage(event) {
+  const isSameMatch = currentMatch &&
+    currentMatch.home_team === event.home_team &&
+    currentMatch.away_team === event.away_team &&
+    currentMatch.date === event.commence_time.slice(0, 10);
+
+  if (!isSameMatch) {
+    // Different match — clean up running job state
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    currentJobId = null;
+    tabCache = {};
+    currentMarket = 'goals';
+  }
+
   currentMatch = {
     home_team: event.home_team,
     away_team: event.away_team,
@@ -282,9 +294,6 @@ function openMatchPage(event) {
     league_key: event.league_key || '',
     league_label: event.league_label || '',
   };
-  currentMarket = 'goals';
-  currentJobId = null;
-  tabCache = {};
   showPage('match');
   renderMatchPage();
 }
@@ -442,8 +451,63 @@ async function loadMarketData() {
     }
   } catch (_) {}
 
-  // No cached data
+  // Check for active (running) jobs for this match+market
+  const activeJob = await findActiveJob(m.home_team, m.away_team, m.date, currentMarket);
+  if (activeJob) {
+    currentJobId = activeJob.id;
+    restoreJobProgress(activeJob);
+    return;
+  }
+
+  // No cached data and no running jobs
   resultsArea.innerHTML = '<div class="empty-state"><p>No data collected yet for ' + currentMarket + ' market.</p></div>';
+}
+
+async function findActiveJob(homeTeam, awayTeam, date, market) {
+  try {
+    const resp = await fetch('/api/jobs');
+    const data = await resp.json();
+    const jobs = data.jobs || [];
+    return jobs.find(
+      (j) =>
+        j.homeTeam === homeTeam &&
+        j.awayTeam === awayTeam &&
+        j.date === date &&
+        j.market === market &&
+        !['complete', 'failed'].includes(j.status)
+    ) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function restoreJobProgress(job) {
+  // Render progress UI and replay existing logs
+  renderJobProgress(job.id, job.createdAt);
+
+  // Replay status and logs from server state
+  if (job.status !== 'pending') {
+    updateJobStatus(job.id, job.status);
+  }
+  const logEl = document.getElementById('job-log-' + job.id);
+  if (logEl && job.logs) {
+    job.logs.forEach((log) => {
+      const time = new Date(log.time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = '[' + time + '] ' + log.message;
+      logEl.appendChild(entry);
+    });
+  }
+
+  // Disable action buttons while job is running
+  const collectBtn = document.getElementById('btn-collect');
+  const analyzeBtn = document.getElementById('btn-analyze');
+  if (collectBtn) { collectBtn.disabled = true; collectBtn.classList.add('loading'); }
+  if (analyzeBtn) { analyzeBtn.disabled = true; analyzeBtn.classList.add('loading'); }
+
+  // Reconnect SSE
+  connectSSE(job.id);
 }
 
 async function renderCachedResults(jobId, hasAnalysis) {
@@ -535,7 +599,7 @@ async function startJob(homeTeam, awayTeam, date, market, analyze) {
   }
 }
 
-function renderJobProgress(jobId) {
+function renderJobProgress(jobId, createdAt) {
   const progressArea = document.getElementById('match-progress');
   progressArea.innerHTML = '';
 
@@ -589,9 +653,9 @@ function renderJobProgress(jobId) {
 
   progressArea.append(logToggle, log);
 
-  // Start elapsed timer
+  // Start elapsed timer (use createdAt if restoring an existing job)
   if (elapsedTimer) clearInterval(elapsedTimer);
-  const startTime = Date.now();
+  const startTime = createdAt || Date.now();
   elapsedTimer = setInterval(() => {
     const secs = Math.round((Date.now() - startTime) / 1000);
     const el = document.getElementById('job-elapsed-' + jobId);
@@ -766,14 +830,12 @@ async function loadHistory() {
       return;
     }
 
-    const card = document.createElement('div');
-    card.className = 'card';
+    container.innerHTML = '';
 
     jobs.forEach((job) => {
       const item = document.createElement('div');
-      item.className = 'history-item';
+      item.className = 'history-card';
       item.addEventListener('click', () => {
-        // Navigate to match info page for this job's match
         openMatchPage({
           home_team: job.homeTeam,
           away_team: job.awayTeam,
@@ -783,32 +845,85 @@ async function loadHistory() {
         });
       });
 
-      const info = document.createElement('div');
-      info.className = 'history-info';
+      // Top row: teams + status
+      const topRow = document.createElement('div');
+      topRow.className = 'history-top-row';
 
       const teams = document.createElement('div');
       teams.className = 'history-teams';
       teams.textContent = job.homeTeam + ' vs ' + job.awayTeam;
 
-      const meta = document.createElement('div');
-      meta.className = 'history-meta';
-      const createdDate = new Date(job.createdAt).toLocaleString('en-GB', {
-        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-      });
-      meta.textContent = job.date + ' \u00B7 ' + job.market + ' \u00B7 ' + createdDate;
-
-      info.append(teams, meta);
-
       const statusBadge = document.createElement('span');
       statusBadge.className = 'job-status status-' + job.status;
       statusBadge.textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
 
-      item.append(info, statusBadge);
-      card.appendChild(item);
-    });
+      topRow.append(teams, statusBadge);
+      item.appendChild(topRow);
 
-    container.innerHTML = '';
-    container.appendChild(card);
+      // Info row: match date, market, badges, duration
+      const infoRow = document.createElement('div');
+      infoRow.className = 'history-info-row';
+
+      // Match date
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'history-detail';
+      dateSpan.textContent = job.date;
+      infoRow.appendChild(dateSpan);
+
+      // Market badge
+      const marketBadge = document.createElement('span');
+      marketBadge.className = 'history-market';
+      marketBadge.textContent = job.market;
+      infoRow.appendChild(marketBadge);
+
+      // Report/analysis availability badges
+      if (job.hasReport) {
+        const reportBadge = document.createElement('span');
+        reportBadge.className = 'history-badge badge-report';
+        reportBadge.textContent = 'Report';
+        infoRow.appendChild(reportBadge);
+      }
+      if (job.hasAnalysis) {
+        const analysisBadge = document.createElement('span');
+        analysisBadge.className = 'history-badge badge-analysis';
+        analysisBadge.textContent = 'Analysis';
+        infoRow.appendChild(analysisBadge);
+      }
+
+      // Duration (for terminal states)
+      if (['complete', 'failed'].includes(job.status) && job.updatedAt && job.createdAt) {
+        const durationMs = job.updatedAt - job.createdAt;
+        const durationSec = Math.round(durationMs / 1000);
+        const durationStr = durationSec < 60
+          ? durationSec + 's'
+          : Math.floor(durationSec / 60) + 'm ' + (durationSec % 60) + 's';
+        const durationSpan = document.createElement('span');
+        durationSpan.className = 'history-duration';
+        durationSpan.textContent = durationStr;
+        infoRow.appendChild(durationSpan);
+      }
+
+      item.appendChild(infoRow);
+
+      // Timestamp row
+      const timeRow = document.createElement('div');
+      timeRow.className = 'history-time-row';
+      const createdDate = new Date(job.createdAt).toLocaleString('en-GB', {
+        weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+      timeRow.textContent = 'Started ' + createdDate;
+      item.appendChild(timeRow);
+
+      // Error message if failed
+      if (job.status === 'failed' && job.error) {
+        const errorRow = document.createElement('div');
+        errorRow.className = 'history-error';
+        errorRow.textContent = job.error;
+        item.appendChild(errorRow);
+      }
+
+      container.appendChild(item);
+    });
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
   }
