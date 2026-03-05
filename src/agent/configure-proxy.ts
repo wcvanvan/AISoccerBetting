@@ -9,9 +9,9 @@ let configured = false;
 
 export function configureAnthropicProxy(): void {
   if (configured) return;
+  configured = true;
   const url = process.env.PROXY || process.env.HTTP_PROXY;
   if (url) {
     setGlobalDispatcher(new ProxyAgent(url));
-    configured = true;
   }
 }

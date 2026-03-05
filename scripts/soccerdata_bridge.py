@@ -1003,19 +1003,22 @@ class DataAssembler:
                     team_xg = row.get("away_xg")
                     opp_xg = row.get("home_xg")
 
-                extras = match.setdefault("extras", {})
+                extras = match.setdefault("extras", {}) or {}
+                match["extras"] = extras
                 if team_xg is not None and not pd.isna(team_xg):
                     xg_val = round(float(team_xg), 2)
                     extras["xG"] = xg_val
-                    m_stats = match.setdefault("stats", {})
-                    if m_stats.get("expected_goals") is None:
-                        m_stats["expected_goals"] = xg_val
+                    if match.get("stats") is None:
+                        match["stats"] = {}
+                    if match["stats"].get("expected_goals") is None:
+                        match["stats"]["expected_goals"] = xg_val
                 if opp_xg is not None and not pd.isna(opp_xg):
                     xga_val = round(float(opp_xg), 2)
                     extras["xGA"] = xga_val
-                    opp_stats = match.setdefault("opponent_stats", {})
-                    if opp_stats.get("expected_goals") is None:
-                        opp_stats["expected_goals"] = xga_val
+                    if match.get("opponent_stats") is None:
+                        match["opponent_stats"] = {}
+                    if match["opponent_stats"].get("expected_goals") is None:
+                        match["opponent_stats"]["expected_goals"] = xga_val
                 break
 
         return matches
@@ -1062,19 +1065,25 @@ class DataAssembler:
                 a_xg = home_xg if a_is_home else away_xg
                 if a_xg is not None and not pd.isna(a_xg):
                     xg_val = round(float(a_xg), 2)
-                    match.setdefault("teamA_extras", {})["xG"] = xg_val
-                    a_stats = match.setdefault("teamA_stats", {})
-                    if a_stats.get("expected_goals") is None:
-                        a_stats["expected_goals"] = xg_val
+                    if match.get("teamA_extras") is None:
+                        match["teamA_extras"] = {}
+                    match["teamA_extras"]["xG"] = xg_val
+                    if match.get("teamA_stats") is None:
+                        match["teamA_stats"] = {}
+                    if match["teamA_stats"].get("expected_goals") is None:
+                        match["teamA_stats"]["expected_goals"] = xg_val
 
                 # Assign xG to team_b
                 b_xg = home_xg if b_is_home else away_xg
                 if b_xg is not None and not pd.isna(b_xg):
                     xg_val = round(float(b_xg), 2)
-                    match.setdefault("teamB_extras", {})["xG"] = xg_val
-                    b_stats = match.setdefault("teamB_stats", {})
-                    if b_stats.get("expected_goals") is None:
-                        b_stats["expected_goals"] = xg_val
+                    if match.get("teamB_extras") is None:
+                        match["teamB_extras"] = {}
+                    match["teamB_extras"]["xG"] = xg_val
+                    if match.get("teamB_stats") is None:
+                        match["teamB_stats"] = {}
+                    if match["teamB_stats"].get("expected_goals") is None:
+                        match["teamB_stats"]["expected_goals"] = xg_val
                 break
 
         return h2h_matches
