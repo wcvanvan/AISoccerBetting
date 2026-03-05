@@ -3,9 +3,12 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { FastifyInstance } from 'fastify';
 import { Marked } from 'marked';
 import { jobManager } from '../services/job-manager';
+import { getCachedPaths, REPORTS_DIR } from '../services/pipeline-service';
+import { MarketType } from '../services/job-manager';
 
 /** Marked instance configured to strip raw HTML (XSS prevention) */
 const safeMarked = new Marked({
@@ -93,6 +96,76 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     // Use a virtual key for concise cache (different from full analysis)
     const conciseKey = job.analysisPath + ':concise';
     const stat = fs.statSync(job.analysisPath);
+    const entry = htmlCache.get(conciseKey);
+    let html: string;
+    if (entry && entry.mtime === stat.mtimeMs) {
+      html = entry.html;
+    } else {
+      html = wrapTables(await safeMarked.parse(concise));
+      htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
+    }
+    return { html };
+  });
+
+  /**
+   * Serve report content by match + market (no job ID needed).
+   * Used by the history page to view CLI-generated and cached reports.
+   *
+   * GET /api/reports/match/:tab?homeTeam=...&awayTeam=...&date=...&market=...
+   * :tab is one of: raw, analysis, concise
+   */
+  app.get('/api/match-report/:tab', async (request, reply) => {
+    const { tab } = request.params as { tab: string };
+    const query = request.query as {
+      homeTeam?: string;
+      awayTeam?: string;
+      date?: string;
+      market?: string;
+    };
+    const homeTeam = query.homeTeam?.trim();
+    const awayTeam = query.awayTeam?.trim();
+    const date = query.date?.trim();
+    const market = query.market?.trim() as MarketType | undefined;
+
+    if (!homeTeam || !awayTeam || !date || !market) {
+      reply.status(400);
+      return { error: 'Missing required query params: homeTeam, awayTeam, date, market' };
+    }
+
+    if (!['raw', 'analysis', 'concise'].includes(tab)) {
+      reply.status(400);
+      return { error: 'Tab must be one of: raw, analysis, concise' };
+    }
+
+    const cached = getCachedPaths(homeTeam, awayTeam, date, market);
+
+    if (tab === 'raw') {
+      if (!cached.reportPath) {
+        reply.status(404);
+        return { error: 'Report not found' };
+      }
+      const html = await renderCached(cached.reportPath);
+      return { html };
+    }
+
+    if (tab === 'analysis') {
+      if (!cached.analysisPath) {
+        reply.status(404);
+        return { error: 'Analysis not found' };
+      }
+      const html = await renderCached(cached.analysisPath);
+      return { html };
+    }
+
+    // concise
+    if (!cached.analysisPath) {
+      reply.status(404);
+      return { error: 'Analysis not found' };
+    }
+    const markdown = fs.readFileSync(cached.analysisPath, 'utf8');
+    const concise = extractValuePicks(markdown);
+    const conciseKey = cached.analysisPath + ':concise';
+    const stat = fs.statSync(cached.analysisPath);
     const entry = htmlCache.get(conciseKey);
     let html: string;
     if (entry && entry.mtime === stat.mtimeMs) {

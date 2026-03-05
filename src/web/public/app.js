@@ -428,26 +428,9 @@ async function loadMarketData() {
     const marketInfo = (data.markets || {})[currentMarket];
 
     if (marketInfo && (marketInfo.hasReport || marketInfo.hasAnalysis)) {
-      // Load cached results by creating a temp job that references cached files
-      const jobResp = await fetch('/api/analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          homeTeam: m.home_team,
-          awayTeam: m.away_team,
-          date: m.date,
-          market: currentMarket,
-          analyze: false,
-          force: false,
-        }),
-      });
-      const jobData = await jobResp.json();
-
-      if (jobData.cached && jobData.jobId) {
-        currentJobId = jobData.jobId;
-        renderCachedResults(jobData.jobId, marketInfo.hasAnalysis);
-        return;
-      }
+      // Render cached results directly using match-based report routes (no job creation)
+      renderMatchCachedResults(m, currentMarket, marketInfo.hasAnalysis);
+      return;
     }
   } catch (_) {}
 
@@ -542,6 +525,84 @@ async function renderCachedResults(jobId, hasAnalysis) {
 
   resultsArea.append(tabs, content);
   await loadTabContent(jobId, tabDefs[0].key);
+}
+
+/**
+ * Render cached results using match-based report routes (no job ID needed).
+ * Used when viewing cached data from the match page.
+ */
+async function renderMatchCachedResults(match, market, hasAnalysis) {
+  const resultsArea = document.getElementById('match-results');
+  resultsArea.innerHTML = '';
+
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+
+  const tabDefs = hasAnalysis
+    ? [
+        { key: 'concise', label: 'Value Picks' },
+        { key: 'analysis', label: 'Full Analysis' },
+        { key: 'raw', label: 'Data Report' },
+      ]
+    : [{ key: 'raw', label: 'Data Report' }];
+
+  const contentKey = match.home_team + '|' + match.away_team + '|' + match.date + '|' + market;
+  const content = document.createElement('div');
+  content.id = 'tab-content-match';
+
+  tabDefs.forEach((t, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (i === 0 ? ' active' : '');
+    btn.textContent = t.label;
+    btn.addEventListener('click', () => {
+      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadMatchTabContent(content, match, market, t.key, contentKey);
+    });
+    tabs.appendChild(btn);
+  });
+
+  resultsArea.append(tabs, content);
+  await loadMatchTabContent(content, match, market, tabDefs[0].key, contentKey);
+}
+
+async function loadMatchTabContent(container, match, market, tab, contentKey) {
+  const cacheKey = contentKey + ':' + tab;
+  if (tabCache[cacheKey]) {
+    container.innerHTML = '';
+    const body = document.createElement('div');
+    body.className = 'markdown-body';
+    body.innerHTML = tabCache[cacheKey];
+    container.appendChild(body);
+    return;
+  }
+
+  container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+
+  try {
+    const params = new URLSearchParams({
+      homeTeam: match.home_team,
+      awayTeam: match.away_team,
+      date: match.date,
+      market: market,
+    });
+    const resp = await fetch('/api/match-report/' + tab + '?' + params);
+    const data = await resp.json();
+
+    if (data.error) {
+      container.innerHTML = '<div class="empty-state"><p>' + esc(data.error) + '</p></div>';
+      return;
+    }
+
+    tabCache[cacheKey] = data.html;
+    container.innerHTML = '';
+    const body = document.createElement('div');
+    body.className = 'markdown-body';
+    body.innerHTML = data.html;
+    container.appendChild(body);
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
+  }
 }
 
 // ── Job launch + progress ───────────────────────────────────────────────────
@@ -821,109 +882,165 @@ async function loadHistory() {
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
 
   try {
-    const resp = await fetch('/api/jobs');
+    const resp = await fetch('/api/history');
     const data = await resp.json();
-    const jobs = data.jobs || [];
+    const matches = data.matches || [];
 
-    if (jobs.length === 0) {
+    if (matches.length === 0) {
       container.innerHTML = '<div class="empty-state"><h3>No analyses yet</h3><p>Run your first analysis from a match page.</p></div>';
       return;
     }
 
     container.innerHTML = '';
 
-    jobs.forEach((job) => {
+    matches.forEach((match) => {
       const item = document.createElement('div');
       item.className = 'history-card';
-      item.addEventListener('click', () => {
+
+      // Top row: teams
+      const topRow = document.createElement('div');
+      topRow.className = 'history-top-row';
+      topRow.style.cursor = 'pointer';
+      topRow.addEventListener('click', () => {
         openMatchPage({
-          home_team: job.homeTeam,
-          away_team: job.awayTeam,
-          commence_time: job.date + 'T00:00:00Z',
+          home_team: match.homeTeam,
+          away_team: match.awayTeam,
+          commence_time: match.date + 'T00:00:00Z',
           league_key: '',
           league_label: '',
         });
       });
 
-      // Top row: teams + status
-      const topRow = document.createElement('div');
-      topRow.className = 'history-top-row';
-
       const teams = document.createElement('div');
       teams.className = 'history-teams';
-      teams.textContent = job.homeTeam + ' vs ' + job.awayTeam;
+      teams.textContent = match.homeTeam + ' vs ' + match.awayTeam;
 
-      const statusBadge = document.createElement('span');
-      statusBadge.className = 'job-status status-' + job.status;
-      statusBadge.textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
-
-      topRow.append(teams, statusBadge);
+      topRow.appendChild(teams);
       item.appendChild(topRow);
 
-      // Info row: match date, market, badges, duration
+      // Info row: date + market badges
       const infoRow = document.createElement('div');
       infoRow.className = 'history-info-row';
 
-      // Match date
       const dateSpan = document.createElement('span');
       dateSpan.className = 'history-detail';
-      dateSpan.textContent = job.date;
+      dateSpan.textContent = match.date;
       infoRow.appendChild(dateSpan);
 
-      // Market badge
-      const marketBadge = document.createElement('span');
-      marketBadge.className = 'history-market';
-      marketBadge.textContent = job.market;
-      infoRow.appendChild(marketBadge);
+      // Market badges with report/analysis status
+      const marketNames = ['goals', 'corners', 'cards'];
+      marketNames.forEach((mk) => {
+        const info = match.markets[mk];
+        if (!info) return;
 
-      // Report/analysis availability badges
-      if (job.hasReport) {
-        const reportBadge = document.createElement('span');
-        reportBadge.className = 'history-badge badge-report';
-        reportBadge.textContent = 'Report';
-        infoRow.appendChild(reportBadge);
-      }
-      if (job.hasAnalysis) {
-        const analysisBadge = document.createElement('span');
-        analysisBadge.className = 'history-badge badge-analysis';
-        analysisBadge.textContent = 'Analysis';
-        infoRow.appendChild(analysisBadge);
-      }
-
-      // Duration (for terminal states)
-      if (['complete', 'failed'].includes(job.status) && job.updatedAt && job.createdAt) {
-        const durationMs = job.updatedAt - job.createdAt;
-        const durationSec = Math.round(durationMs / 1000);
-        const durationStr = durationSec < 60
-          ? durationSec + 's'
-          : Math.floor(durationSec / 60) + 'm ' + (durationSec % 60) + 's';
-        const durationSpan = document.createElement('span');
-        durationSpan.className = 'history-duration';
-        durationSpan.textContent = durationStr;
-        infoRow.appendChild(durationSpan);
-      }
+        const badge = document.createElement('span');
+        badge.className = 'history-market' + (info.hasAnalysis ? ' has-analysis' : '');
+        badge.textContent = mk.charAt(0).toUpperCase() + mk.slice(1);
+        badge.title = mk + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
+        badge.style.cursor = 'pointer';
+        badge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openHistoryReport(match, mk, item);
+        });
+        infoRow.appendChild(badge);
+      });
 
       item.appendChild(infoRow);
 
       // Timestamp row
       const timeRow = document.createElement('div');
       timeRow.className = 'history-time-row';
-      const createdDate = new Date(job.createdAt).toLocaleString('en-GB', {
+      const modDate = new Date(match.lastModified).toLocaleString('en-GB', {
         weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
       });
-      timeRow.textContent = 'Started ' + createdDate;
+      timeRow.textContent = 'Last updated ' + modDate;
       item.appendChild(timeRow);
 
-      // Error message if failed
-      if (job.status === 'failed' && job.error) {
-        const errorRow = document.createElement('div');
-        errorRow.className = 'history-error';
-        errorRow.textContent = job.error;
-        item.appendChild(errorRow);
-      }
+      // Expandable report viewer area
+      const viewerArea = document.createElement('div');
+      viewerArea.className = 'history-viewer';
+      viewerArea.id = 'history-viewer-' + match.homeTeam + '-' + match.awayTeam + '-' + match.date;
+      item.appendChild(viewerArea);
 
       container.appendChild(item);
     });
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
+  }
+}
+
+async function openHistoryReport(match, market, cardEl) {
+  const viewerId = 'history-viewer-' + match.homeTeam + '-' + match.awayTeam + '-' + match.date;
+  const viewer = document.getElementById(viewerId);
+  if (!viewer) return;
+
+  // Toggle off if clicking the same market again
+  if (viewer.dataset.market === market && viewer.innerHTML) {
+    viewer.innerHTML = '';
+    viewer.dataset.market = '';
+    return;
+  }
+
+  viewer.dataset.market = market;
+  const marketInfo = match.markets[market];
+  const hasAnalysis = marketInfo && marketInfo.hasAnalysis;
+
+  // Build tabs
+  viewer.innerHTML = '';
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+
+  const tabDefs = hasAnalysis
+    ? [
+        { key: 'concise', label: 'Value Picks' },
+        { key: 'analysis', label: 'Full Analysis' },
+        { key: 'raw', label: 'Data Report' },
+      ]
+    : [{ key: 'raw', label: 'Data Report' }];
+
+  const content = document.createElement('div');
+  content.className = 'history-tab-content';
+
+  tabDefs.forEach((t, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (i === 0 ? ' active' : '');
+    btn.textContent = t.label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadHistoryTabContent(content, match, market, t.key);
+    });
+    tabs.appendChild(btn);
+  });
+
+  viewer.append(tabs, content);
+  await loadHistoryTabContent(content, match, market, tabDefs[0].key);
+}
+
+async function loadHistoryTabContent(container, match, market, tab) {
+  container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+
+  try {
+    const params = new URLSearchParams({
+      homeTeam: match.homeTeam,
+      awayTeam: match.awayTeam,
+      date: match.date,
+      market: market,
+    });
+    const resp = await fetch('/api/match-report/' + tab + '?' + params);
+    const data = await resp.json();
+
+    if (data.error) {
+      container.innerHTML = '<div class="empty-state"><p>' + esc(data.error) + '</p></div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    const body = document.createElement('div');
+    body.className = 'markdown-body';
+    body.innerHTML = data.html;
+    container.appendChild(body);
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
   }

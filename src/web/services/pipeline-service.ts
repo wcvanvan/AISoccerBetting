@@ -21,7 +21,7 @@ import { buildReportFilename } from '../../cli-shared';
 import { jobManager, Job, MarketType } from './job-manager';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-const REPORTS_DIR = path.join(PROJECT_ROOT, 'data', 'reports');
+export const REPORTS_DIR = path.join(PROJECT_ROOT, 'data', 'reports');
 
 interface MarketPipelineConfig {
   marketConfig: MarketConfig;

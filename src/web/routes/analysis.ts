@@ -2,9 +2,11 @@
  * Analysis routes — trigger data collection + analysis, stream progress via SSE.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { FastifyInstance } from 'fastify';
 import { jobManager, MarketType } from '../services/job-manager';
-import { runPipelineForJob, getCachedPaths } from '../services/pipeline-service';
+import { runPipelineForJob, getCachedPaths, REPORTS_DIR } from '../services/pipeline-service';
 
 export async function analysisRoutes(app: FastifyInstance): Promise<void> {
   /** Launch a new analysis job */
@@ -271,7 +273,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     return { markets };
   });
 
-  /** List all jobs */
+  /** List all jobs (in-memory, for active/running jobs) */
   app.get('/api/jobs', async () => {
     const jobs = jobManager.getAll().map((j) => ({
       id: j.id,
@@ -289,4 +291,135 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     }));
     return { jobs };
   });
+
+  /**
+   * History endpoint — scans data/reports/ directory to discover all matches
+   * (both web- and CLI-generated). Groups by match, lists available markets.
+   */
+  app.get('/api/history', async () => {
+    if (!fs.existsSync(REPORTS_DIR)) return { matches: [] };
+
+    const files = fs.readdirSync(REPORTS_DIR).filter((f) => f.endsWith('.md'));
+
+    // Parse filenames: {slug-a}-vs-{slug-b}-{YYYY-MM-DD}-{market}[-analysis].md
+    const reportPattern =
+      /^(.+)-vs-(.+)-(\d{4}-\d{2}-\d{2})-(goals|corners|cards)(-analysis)?\.md$/;
+
+    // Group by match key (homeSlug-vs-awaySlug-date)
+    const matchMap = new Map<
+      string,
+      {
+        homeSlug: string;
+        awaySlug: string;
+        date: string;
+        homeTeam: string;
+        awayTeam: string;
+        markets: Record<string, { hasReport: boolean; hasAnalysis: boolean }>;
+        mtime: number; // most recent file mtime for sorting
+      }
+    >();
+
+    for (const file of files) {
+      const m = file.match(reportPattern);
+      if (!m) continue;
+
+      const [, homeSlug, awaySlug, date, market, isAnalysis] = m;
+      const matchKey = `${homeSlug}-vs-${awaySlug}-${date}`;
+
+      if (!matchMap.has(matchKey)) {
+        // Read first line of any report file to get display names
+        let homeTeam = unslug(homeSlug);
+        let awayTeam = unslug(awaySlug);
+        const reportFile = `${homeSlug}-vs-${awaySlug}-${date}-${market}.md`;
+        const reportPath = path.join(REPORTS_DIR, reportFile);
+        if (!isAnalysis && fs.existsSync(reportPath)) {
+          const firstLine = readFirstLine(reportPath);
+          const parsed = parseTitle(firstLine);
+          if (parsed) {
+            homeTeam = parsed.home;
+            awayTeam = parsed.away;
+          }
+        }
+        matchMap.set(matchKey, {
+          homeSlug,
+          awaySlug,
+          date,
+          homeTeam,
+          awayTeam,
+          markets: {},
+          mtime: 0,
+        });
+      }
+
+      const entry = matchMap.get(matchKey)!;
+
+      // If we haven't parsed team names yet (first file was analysis), try now
+      if (
+        entry.homeTeam === unslug(homeSlug) &&
+        !isAnalysis &&
+        fs.existsSync(path.join(REPORTS_DIR, file))
+      ) {
+        const firstLine = readFirstLine(path.join(REPORTS_DIR, file));
+        const parsed = parseTitle(firstLine);
+        if (parsed) {
+          entry.homeTeam = parsed.home;
+          entry.awayTeam = parsed.away;
+        }
+      }
+
+      if (!entry.markets[market]) {
+        entry.markets[market] = { hasReport: false, hasAnalysis: false };
+      }
+
+      if (isAnalysis) {
+        entry.markets[market].hasAnalysis = true;
+      } else {
+        entry.markets[market].hasReport = true;
+      }
+
+      // Track most recent mtime for sorting
+      const stat = fs.statSync(path.join(REPORTS_DIR, file));
+      if (stat.mtimeMs > entry.mtime) {
+        entry.mtime = stat.mtimeMs;
+      }
+    }
+
+    // Sort by most recently modified
+    const matches = Array.from(matchMap.values())
+      .sort((a, b) => b.mtime - a.mtime)
+      .map(({ homeTeam, awayTeam, date, markets, mtime }) => ({
+        homeTeam,
+        awayTeam,
+        date,
+        markets,
+        lastModified: mtime,
+      }));
+
+    return { matches };
+  });
+}
+
+/** Convert slug back to title case: "tottenham-hotspur" → "Tottenham Hotspur" */
+function unslug(s: string): string {
+  return s
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** Read the first non-empty line of a file */
+function readFirstLine(filePath: string): string {
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(512);
+  fs.readSync(fd, buf, 0, 512, 0);
+  fs.closeSync(fd);
+  const lines = buf.toString('utf8').split('\n');
+  return lines.find((l) => l.trim().length > 0) || '';
+}
+
+/** Parse "# Team A vs Team B" title line */
+function parseTitle(line: string): { home: string; away: string } | null {
+  const m = line.match(/^#\s+(.+?)\s+vs\s+(.+)$/i);
+  if (!m) return null;
+  return { home: m[1].trim(), away: m[2].trim() };
 }
