@@ -22,6 +22,21 @@ interface BridgeResponse {
   id: number;
 }
 
+/** Season-level team stats aggregated from Understat player data */
+export interface TeamSeasonStats {
+  matches: number;
+  goals: number;
+  xG: number;
+  npxG: number;
+  xA: number;
+  keyPasses: number;
+  shots: number;
+  xGChain: number;
+  xGBuildup: number;
+  xAPerMatch: number;
+  keyPassesPerMatch: number;
+}
+
 export class SoccerdataProvider implements DataProvider {
   readonly name = 'soccerdata';
 
@@ -62,6 +77,30 @@ export class SoccerdataProvider implements DataProvider {
     });
     if (!Array.isArray(result)) return [];
     return result.map(toH2HMatch);
+  }
+
+  /**
+   * Fetch season-level aggregated stats from Understat for a team.
+   * Returns xA, key passes, xG chain/buildup totals and per-match rates.
+   * Only available for big-5 European leagues.
+   */
+  async getTeamSeasonStats(teamName: string): Promise<TeamSeasonStats | null> {
+    const result = await this.call('get_team_season_stats', { team: teamName });
+    if (result == null || typeof result !== 'object') return null;
+    const raw = result as Record<string, unknown>;
+    return {
+      matches: Number(raw.matches) || 0,
+      goals: Number(raw.goals) || 0,
+      xG: Number(raw.xG) || 0,
+      npxG: Number(raw.npxG) || 0,
+      xA: Number(raw.xA) || 0,
+      keyPasses: Number(raw.key_passes) || 0,
+      shots: Number(raw.shots) || 0,
+      xGChain: Number(raw.xG_chain) || 0,
+      xGBuildup: Number(raw.xG_buildup) || 0,
+      xAPerMatch: Number(raw.xA_per_match) || 0,
+      keyPassesPerMatch: Number(raw.key_passes_per_match) || 0,
+    };
   }
 
   dispose(): void {

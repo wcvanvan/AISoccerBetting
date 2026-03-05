@@ -88,6 +88,7 @@ class DataAssembler:
         self._seasons = get_seasons()
         self._espn = None       # lazy-initialised ESPN instance
         self._schedule = None   # cached schedule DataFrame
+        self._player_season_stats = None  # cached Understat player season stats
 
     def _get_espn(self):
         """Return a cached ESPN instance."""
@@ -996,24 +997,18 @@ class DataAssembler:
                     continue
 
                 # Team's and opponent's stats based on home/away
-                if is_home:
-                    team_xg = row.get("home_xg")
-                    opp_xg = row.get("away_xg")
-                    team_np_xg = row.get("home_np_xg")
-                    opp_np_xg = row.get("away_np_xg")
-                    team_ppda = row.get("home_ppda")
-                    opp_ppda = row.get("away_ppda")
-                    team_deep = row.get("home_deep_completions")
-                    opp_deep = row.get("away_deep_completions")
-                else:
-                    team_xg = row.get("away_xg")
-                    opp_xg = row.get("home_xg")
-                    team_np_xg = row.get("away_np_xg")
-                    opp_np_xg = row.get("home_np_xg")
-                    team_ppda = row.get("away_ppda")
-                    opp_ppda = row.get("home_ppda")
-                    team_deep = row.get("away_deep_completions")
-                    opp_deep = row.get("home_deep_completions")
+                side = "home" if is_home else "away"
+                opp_side = "away" if is_home else "home"
+                team_xg = row.get(f"{side}_xg")
+                opp_xg = row.get(f"{opp_side}_xg")
+                team_np_xg = row.get(f"{side}_np_xg")
+                opp_np_xg = row.get(f"{opp_side}_np_xg")
+                team_ppda = row.get(f"{side}_ppda")
+                opp_ppda = row.get(f"{opp_side}_ppda")
+                team_deep = row.get(f"{side}_deep_completions")
+                opp_deep = row.get(f"{opp_side}_deep_completions")
+                team_xpts = row.get(f"{side}_expected_points")
+                team_npxgd = row.get(f"{side}_np_xg_difference")
 
                 extras = match.setdefault("extras", {}) or {}
                 match["extras"] = extras
@@ -1049,6 +1044,14 @@ class DataAssembler:
                     extras["deep"] = int(team_deep)
                 if opp_deep is not None and not pd.isna(opp_deep):
                     extras["oppDeep"] = int(opp_deep)
+
+                # xPts (expected points based on xG model)
+                if team_xpts is not None and not pd.isna(team_xpts):
+                    extras["xPts"] = round(float(team_xpts), 2)
+
+                # npxGD (non-penalty xG difference: goals - npxG; positive = overperforming)
+                if team_npxgd is not None and not pd.isna(team_npxgd):
+                    extras["npxGD"] = round(float(team_npxgd), 2)
 
                 break
 
@@ -1123,11 +1126,86 @@ class DataAssembler:
                     if deep is not None and not pd.isna(deep):
                         ext["deep"] = int(deep)
 
+                    xpts = row.get(f"{side}_expected_points")
+                    if xpts is not None and not pd.isna(xpts):
+                        ext["xPts"] = round(float(xpts), 2)
+
+                    npxgd = row.get(f"{side}_np_xg_difference")
+                    if npxgd is not None and not pd.isna(npxgd):
+                        ext["npxGD"] = round(float(npxgd), 2)
+
                 _enrich_team_h2h("teamA", a_is_home)
                 _enrich_team_h2h("teamB", b_is_home)
                 break
 
         return h2h_matches
+
+    # ── Team season stats from Understat ─────────────────────────────────
+
+    def get_team_season_stats(self, team: str) -> dict[str, Any] | None:
+        """Aggregate season-level stats from Understat player data.
+
+        Returns per-90 metrics: xA, key_passes, xG_chain, xG_buildup,
+        plus raw totals and matches played. Only available for big-5 leagues.
+        """
+        us_leagues = [l for l in self._leagues if l in UNDERSTAT_LEAGUES]
+        if not us_leagues:
+            return None
+
+        if self._player_season_stats is None:
+            try:
+                import soccerdata as sd
+                us = sd.Understat(us_leagues, self._seasons)
+                self._player_season_stats = us.read_player_season_stats()
+            except Exception as exc:
+                log.warning("Failed to fetch Understat player season stats: %s", exc)
+                return None
+
+        ps = self._player_season_stats
+        if ps is None or ps.empty:
+            return None
+
+        df = ps.reset_index() if ps.index.names[0] is not None else ps
+
+        # Find team rows via fuzzy match
+        team_rows = df[df["team"].apply(lambda t: self._fuzzy_team_match(team, str(t)))]
+        if team_rows.empty:
+            log.info("No Understat season data for team: %s", team)
+            return None
+
+        # Aggregate across all players
+        total_minutes = team_rows["minutes"].sum()
+        matches = team_rows["matches"].max()  # max since it's per-player
+        total_xa = team_rows["xa"].sum()
+        total_key_passes = int(team_rows["key_passes"].sum())
+        total_xg_chain = team_rows["xg_chain"].sum()
+        total_xg_buildup = team_rows["xg_buildup"].sum()
+        total_goals = int(team_rows["goals"].sum())
+        total_xg = team_rows["xg"].sum()
+        total_npxg = team_rows["np_xg"].sum()
+        total_shots = int(team_rows["shots"].sum())
+
+        # Per-match (not per-90) for team-level context
+        if matches and matches > 0:
+            per_match_xa = round(float(total_xa) / float(matches), 2)
+            per_match_key_passes = round(float(total_key_passes) / float(matches), 1)
+        else:
+            per_match_xa = 0
+            per_match_key_passes = 0
+
+        return {
+            "matches": int(matches) if matches else 0,
+            "goals": total_goals,
+            "xG": round(float(total_xg), 2),
+            "npxG": round(float(total_npxg), 2),
+            "xA": round(float(total_xa), 2),
+            "key_passes": total_key_passes,
+            "shots": total_shots,
+            "xG_chain": round(float(total_xg_chain), 2),
+            "xG_buildup": round(float(total_xg_buildup), 2),
+            "xA_per_match": per_match_xa,
+            "key_passes_per_match": per_match_key_passes,
+        }
 
 
 # ── Request dispatcher ───────────────────────────────────────────────────────
@@ -1153,6 +1231,9 @@ def handle_request(assembler: DataAssembler, req: dict[str, Any]) -> Any:
             team_b=params["team_b"],
             sources=params.get("sources"),
         )
+
+    if method == "get_team_season_stats":
+        return assembler.get_team_season_stats(team=params["team"])
 
     raise ValueError(f"Unknown method: {method}")
 

@@ -16,6 +16,7 @@ import {
   SubbedOffPlayer,
 } from '../types';
 import { MatchOdds } from '../odds/types';
+import { TeamSeasonStats } from '../provider/soccerdata-provider';
 
 export interface FormatOptions {
   /** Show corner data in match lines (default: true) */
@@ -40,7 +41,9 @@ export class MarkdownFormatter {
     alerts: string[],
     matchNewsSummary?: string,
     odds?: MatchOdds,
-    formatOptions?: Partial<FormatOptions>
+    formatOptions?: Partial<FormatOptions>,
+    teamA_season?: TeamSeasonStats,
+    teamB_season?: TeamSeasonStats
   ): string {
     const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
     const isGoalMode = opts.oddsLabel === 'Goal';
@@ -60,6 +63,12 @@ export class MarkdownFormatter {
     if (h2h_matches.length > 0) {
       s.push(`## H2H (Last 2 Seasons)\n`);
       s.push(this.formatH2H(h2h_matches, teamA_name, teamB_name, opts));
+    }
+
+    // Season-level advanced stats (goal mode only, from Understat)
+    if (isGoalMode && (teamA_season || teamB_season)) {
+      s.push(`## Season Stats (Understat)\n`);
+      s.push(this.formatSeasonStats(teamA_name, teamA_season, teamB_name, teamB_season));
     }
 
     if (matchNewsSummary?.trim()) {
@@ -294,6 +303,28 @@ export class MarkdownFormatter {
     return `${out} | Subs: ${subParts.join(', ')}`;
   }
 
+  // ── Season Stats ─────────────────────────────────────────────────────────
+
+  private formatSeasonStats(
+    teamA: string, teamA_season: TeamSeasonStats | undefined,
+    teamB: string, teamB_season: TeamSeasonStats | undefined
+  ): string {
+    const fmt = (s: TeamSeasonStats | undefined): string => {
+      if (!s || !s.matches) return 'N/A';
+      const xgPerMatch = (s.xG / s.matches).toFixed(2);
+      const npxgPerMatch = (s.npxG / s.matches).toFixed(2);
+      const xaPerMatch = s.xAPerMatch.toFixed(2);
+      const goalsPerMatch = (s.goals / s.matches).toFixed(2);
+      const shotsPerMatch = (s.shots / s.matches).toFixed(1);
+      const kpPerMatch = s.keyPassesPerMatch.toFixed(1);
+      const xgChainPerMatch = (s.xGChain / s.matches).toFixed(2);
+      const xgBuildupPerMatch = (s.xGBuildup / s.matches).toFixed(2);
+      return `${s.matches} matches · ${s.goals}G (${goalsPerMatch}/m) · xG ${s.xG.toFixed(1)} (${xgPerMatch}/m) · npxG ${s.npxG.toFixed(1)} (${npxgPerMatch}/m) · xA ${s.xA.toFixed(1)} (${xaPerMatch}/m) · KP ${s.keyPasses} (${kpPerMatch}/m) · Shots ${s.shots} (${shotsPerMatch}/m) · xGChain ${s.xGChain.toFixed(1)} (${xgChainPerMatch}/m) · xGBuildup ${s.xGBuildup.toFixed(1)} (${xgBuildupPerMatch}/m)`;
+    };
+
+    return `${teamA}: ${fmt(teamA_season)}\n${teamB}: ${fmt(teamB_season)}\n`;
+  }
+
   // ── H2H ───────────────────────────────────────────────────────────────────
 
   private formatH2H(matches: H2HMatch[], teamA: string, teamB: string, opts: FormatOptions): string {
@@ -435,6 +466,8 @@ export class MarkdownFormatter {
     oppPPDA: 'oppPPDA',
     deep: 'Deep',
     oppDeep: 'oppDeep',
+    xPts: 'xPts',
+    npxGD: 'npxGD',
     possession: 'Poss',
     saves: 'Saves',
     shots: 'Shots',
