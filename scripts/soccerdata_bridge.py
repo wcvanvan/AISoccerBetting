@@ -1207,6 +1207,85 @@ class DataAssembler:
             "key_passes_per_match": per_match_key_passes,
         }
 
+    # ── League context from Understat ────────────────────────────────────
+
+    def get_league_context(self, league: str) -> dict[str, Any] | None:
+        """Compute league-average stats from Understat match data.
+
+        Accepts a league name (e.g. "ENG-Premier League") or a team name
+        (e.g. "Tottenham") — in the latter case, the team's league is
+        looked up from the schedule.
+
+        Returns averages for goals, xG, npxG, PPDA, deep completions,
+        plus BTTS%, over/under percentages, and clean sheet rates.
+        """
+        us_leagues = [l for l in self._leagues if l in UNDERSTAT_LEAGUES]
+        target = [l for l in us_leagues if self._fuzzy_team_match(league, l)]
+        if not target:
+            # Try resolving as a team name via schedule
+            schedule = self._get_schedule()
+            if schedule is not None and not schedule.empty:
+                sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
+                team_rows = sched[
+                    sched["home_team"].apply(lambda t: self._fuzzy_team_match(league, str(t)))
+                    | sched["away_team"].apply(lambda t: self._fuzzy_team_match(league, str(t)))
+                ]
+                if not team_rows.empty:
+                    team_league = str(team_rows.iloc[0]["league"])
+                    target = [l for l in us_leagues if self._fuzzy_team_match(team_league, l)]
+        if not target:
+            # Final fallback: all Understat leagues
+            target = us_leagues
+        if not target:
+            return None
+
+        try:
+            import soccerdata as sd
+            us = sd.Understat(target, self._seasons)
+            tms = us.read_team_match_stats()
+        except Exception as exc:
+            log.warning("Failed to fetch Understat team match stats for league context: %s", exc)
+            return None
+
+        if tms is None or tms.empty:
+            return None
+
+        df = tms.reset_index() if tms.index.names[0] is not None else tms
+
+        # Deduplicate: each game_id appears twice (home + away perspective)
+        games = df.drop_duplicates(subset="game_id")
+        n = len(games)
+        if n == 0:
+            return None
+
+        hg = games["home_goals"]
+        ag = games["away_goals"]
+        total_goals = hg + ag
+
+        league_name = ", ".join(target) if len(target) <= 2 else f"{len(target)} leagues"
+
+        return {
+            "league": league_name,
+            "matches": n,
+            "avg_goals_per_match": round(float(total_goals.mean()), 2),
+            "avg_home_goals": round(float(hg.mean()), 2),
+            "avg_away_goals": round(float(ag.mean()), 2),
+            "avg_xg_per_match": round(float((games["home_xg"] + games["away_xg"]).mean()), 2),
+            "avg_home_xg": round(float(games["home_xg"].mean()), 2),
+            "avg_away_xg": round(float(games["away_xg"].mean()), 2),
+            "avg_npxg_per_match": round(float((games["home_np_xg"] + games["away_np_xg"]).mean()), 2),
+            "avg_home_ppda": round(float(games["home_ppda"].mean()), 1),
+            "avg_away_ppda": round(float(games["away_ppda"].mean()), 1),
+            "avg_home_deep": round(float(games["home_deep_completions"].mean()), 1),
+            "avg_away_deep": round(float(games["away_deep_completions"].mean()), 1),
+            "btts_pct": round(float(((hg > 0) & (ag > 0)).mean() * 100), 1),
+            "over_1_5_pct": round(float((total_goals > 1.5).mean() * 100), 1),
+            "over_2_5_pct": round(float((total_goals > 2.5).mean() * 100), 1),
+            "over_3_5_pct": round(float((total_goals > 3.5).mean() * 100), 1),
+            "clean_sheet_home_pct": round(float((ag == 0).mean() * 100), 1),
+            "clean_sheet_away_pct": round(float((hg == 0).mean() * 100), 1),
+        }
+
 
 # ── Request dispatcher ───────────────────────────────────────────────────────
 
@@ -1234,6 +1313,9 @@ def handle_request(assembler: DataAssembler, req: dict[str, Any]) -> Any:
 
     if method == "get_team_season_stats":
         return assembler.get_team_season_stats(team=params["team"])
+
+    if method == "get_league_context":
+        return assembler.get_league_context(league=params["league"])
 
     raise ValueError(f"Unknown method: {method}")
 

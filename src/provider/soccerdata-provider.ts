@@ -37,6 +37,29 @@ export interface TeamSeasonStats {
   keyPassesPerMatch: number;
 }
 
+/** League-level context stats computed from Understat match data */
+export interface LeagueContext {
+  league: string;
+  matches: number;
+  avgGoalsPerMatch: number;
+  avgHomeGoals: number;
+  avgAwayGoals: number;
+  avgXgPerMatch: number;
+  avgHomeXg: number;
+  avgAwayXg: number;
+  avgNpxgPerMatch: number;
+  avgHomePpda: number;
+  avgAwayPpda: number;
+  avgHomeDeep: number;
+  avgAwayDeep: number;
+  bttsPct: number;
+  over15Pct: number;
+  over25Pct: number;
+  over35Pct: number;
+  cleanSheetHomePct: number;
+  cleanSheetAwayPct: number;
+}
+
 export class SoccerdataProvider implements DataProvider {
   readonly name = 'soccerdata';
 
@@ -100,6 +123,37 @@ export class SoccerdataProvider implements DataProvider {
       xGBuildup: Number(raw.xG_buildup) || 0,
       xAPerMatch: Number(raw.xA_per_match) || 0,
       keyPassesPerMatch: Number(raw.key_passes_per_match) || 0,
+    };
+  }
+
+  /**
+   * Fetch league-level context stats from Understat.
+   * Returns averages for goals, xG, PPDA, deep completions, plus BTTS/over-under/clean-sheet rates.
+   */
+  async getLeagueContext(league: string): Promise<LeagueContext | null> {
+    const result = await this.call('get_league_context', { league });
+    if (result == null || typeof result !== 'object') return null;
+    const raw = result as Record<string, unknown>;
+    return {
+      league: String(raw.league ?? ''),
+      matches: Number(raw.matches) || 0,
+      avgGoalsPerMatch: Number(raw.avg_goals_per_match) || 0,
+      avgHomeGoals: Number(raw.avg_home_goals) || 0,
+      avgAwayGoals: Number(raw.avg_away_goals) || 0,
+      avgXgPerMatch: Number(raw.avg_xg_per_match) || 0,
+      avgHomeXg: Number(raw.avg_home_xg) || 0,
+      avgAwayXg: Number(raw.avg_away_xg) || 0,
+      avgNpxgPerMatch: Number(raw.avg_npxg_per_match) || 0,
+      avgHomePpda: Number(raw.avg_home_ppda) || 0,
+      avgAwayPpda: Number(raw.avg_away_ppda) || 0,
+      avgHomeDeep: Number(raw.avg_home_deep) || 0,
+      avgAwayDeep: Number(raw.avg_away_deep) || 0,
+      bttsPct: Number(raw.btts_pct) || 0,
+      over15Pct: Number(raw.over_1_5_pct) || 0,
+      over25Pct: Number(raw.over_2_5_pct) || 0,
+      over35Pct: Number(raw.over_3_5_pct) || 0,
+      cleanSheetHomePct: Number(raw.clean_sheet_home_pct) || 0,
+      cleanSheetAwayPct: Number(raw.clean_sheet_away_pct) || 0,
     };
   }
 

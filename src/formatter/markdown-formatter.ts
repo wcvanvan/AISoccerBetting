@@ -16,7 +16,7 @@ import {
   SubbedOffPlayer,
 } from '../types';
 import { MatchOdds } from '../odds/types';
-import { TeamSeasonStats } from '../provider/soccerdata-provider';
+import { TeamSeasonStats, LeagueContext } from '../provider/soccerdata-provider';
 
 export interface FormatOptions {
   /** Show corner data in match lines (default: true) */
@@ -43,7 +43,8 @@ export class MarkdownFormatter {
     odds?: MatchOdds,
     formatOptions?: Partial<FormatOptions>,
     teamA_season?: TeamSeasonStats,
-    teamB_season?: TeamSeasonStats
+    teamB_season?: TeamSeasonStats,
+    leagueContext?: LeagueContext
   ): string {
     const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
     const isGoalMode = opts.oddsLabel === 'Goal';
@@ -69,6 +70,12 @@ export class MarkdownFormatter {
     if (isGoalMode && (teamA_season || teamB_season)) {
       s.push(`## Season Stats (Understat)\n`);
       s.push(this.formatSeasonStats(teamA_name, teamA_season, teamB_name, teamB_season));
+    }
+
+    // League context (goal mode only, from Understat)
+    if (isGoalMode && leagueContext) {
+      s.push(`## League Context (Understat)\n`);
+      s.push(this.formatLeagueContext(leagueContext));
     }
 
     if (matchNewsSummary?.trim()) {
@@ -323,6 +330,23 @@ export class MarkdownFormatter {
     };
 
     return `${teamA}: ${fmt(teamA_season)}\n${teamB}: ${fmt(teamB_season)}\n`;
+  }
+
+  // ── League Context ──────────────────────────────────────────────────────
+
+  private formatLeagueContext(ctx: LeagueContext): string {
+    const lines: string[] = [];
+    const leagueLabel = ctx.league ? ` ${ctx.league}` : '';
+    lines.push(`Based on ${ctx.matches}${leagueLabel} matches this season:`);
+    lines.push(`- Goals/match: ${ctx.avgGoalsPerMatch} (Home ${ctx.avgHomeGoals}, Away ${ctx.avgAwayGoals})`);
+    lines.push(`- xG/match: ${ctx.avgXgPerMatch} (Home ${ctx.avgHomeXg}, Away ${ctx.avgAwayXg})`);
+    lines.push(`- npxG/match: ${ctx.avgNpxgPerMatch}`);
+    lines.push(`- PPDA: Home ${ctx.avgHomePpda}, Away ${ctx.avgAwayPpda}`);
+    lines.push(`- Deep completions: Home ${ctx.avgHomeDeep}, Away ${ctx.avgAwayDeep}`);
+    lines.push(`- BTTS: ${ctx.bttsPct}%`);
+    lines.push(`- Over 1.5: ${ctx.over15Pct}% · Over 2.5: ${ctx.over25Pct}% · Over 3.5: ${ctx.over35Pct}%`);
+    lines.push(`- Clean sheet: Home ${ctx.cleanSheetHomePct}%, Away ${ctx.cleanSheetAwayPct}%`);
+    return lines.join('\n') + '\n';
   }
 
   // ── H2H ───────────────────────────────────────────────────────────────────

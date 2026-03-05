@@ -6,7 +6,7 @@
  */
 
 import { DataProvider } from '../provider/data-provider';
-import { SoccerdataProvider, TeamSeasonStats } from '../provider/soccerdata-provider';
+import { SoccerdataProvider, TeamSeasonStats, LeagueContext } from '../provider/soccerdata-provider';
 import { MarkdownFormatter, FormatOptions } from '../formatter';
 import { MatchDetails, H2HMatch } from '../types';
 import { OddsCollector, MarketConfig, CORNER_MARKET_CONFIG } from '../odds';
@@ -86,7 +86,8 @@ export class MatchDataCollector {
       h2h_matches: H2HMatch[],
       odds?: MatchOdds,
       teamA_season?: TeamSeasonStats | null,
-      teamB_season?: TeamSeasonStats | null
+      teamB_season?: TeamSeasonStats | null,
+      leagueContext?: LeagueContext | null
     ): string =>
       this.markdownFormatter.format_output(
         normalizedInput.teamA_name,
@@ -100,7 +101,8 @@ export class MatchDataCollector {
         odds,
         this.formatOptions,
         teamA_season ?? undefined,
-        teamB_season ?? undefined
+        teamB_season ?? undefined,
+        leagueContext ?? undefined
       );
 
     try {
@@ -111,7 +113,7 @@ export class MatchDataCollector {
       const isGoalMode = this.formatOptions?.oddsLabel === 'Goal';
       const canFetchSeasonStats = isGoalMode && this.provider instanceof SoccerdataProvider;
 
-      const [teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season] = await Promise.all([
+      const [teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext] = await Promise.all([
         this.collectTeamMatches(teamA_id, normalizedInput.teamA_name),
         this.collectTeamMatches(teamB_id, normalizedInput.teamB_name),
         this.collectH2HMatches(
@@ -133,9 +135,12 @@ export class MatchDataCollector {
         canFetchSeasonStats
           ? (this.provider as SoccerdataProvider).getTeamSeasonStats(normalizedInput.teamB_name).catch(() => null)
           : Promise.resolve(null),
+        canFetchSeasonStats
+          ? (this.provider as SoccerdataProvider).getLeagueContext(normalizedInput.teamA_name).catch(() => null)
+          : Promise.resolve(null),
       ]);
 
-      return format(teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season);
+      return format(teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);
