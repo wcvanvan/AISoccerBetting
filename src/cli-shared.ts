@@ -146,7 +146,7 @@ Soccer Betting Analyzer — ${marketLabel} Markets
 ${'='.repeat(42 + marketLabel.length)}
 
 Usage:
-  npm run ${toolName} "TeamA" "TeamB" "YYYY-MM-DD"       Collect data → {slug}.md
+  npm run ${toolName} "TeamA" "TeamB" "YYYY-MM-DD"       Collect data → {slug}-${toolName}.md
   npm run ${toolName}:analyze <report.md>                 Analyse existing report → {slug}-analysis.md
   npm run ${toolName}:news "TeamA" "TeamB" "YYYY-MM-DD"  Fetch match news → {slug}-news.md
   npm run ${toolName}:odds "TeamA" "TeamB"                Fetch ${marketLabel.toLowerCase()} odds for a match
@@ -170,8 +170,8 @@ function slug(s: string): string {
   return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
-function buildReportFilename(teamA: string, teamB: string, date: string): string {
-  return `${slug(teamA)}-vs-${slug(teamB)}-${date}.md`;
+function buildReportFilename(teamA: string, teamB: string, date: string, market: string): string {
+  return `${slug(teamA)}-vs-${slug(teamB)}-${date}-${market}.md`;
 }
 
 function buildAnalysisFilename(reportFilename: string): string {
@@ -390,7 +390,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       matchNewsSummary,
     });
 
-    const reportFilename = buildReportFilename(args.teamA, args.teamB, args.date);
+    const reportFilename = buildReportFilename(args.teamA, args.teamB, args.date, toolName);
     fs.writeFileSync(reportFilename, markdown, 'utf8');
     console.log(`Report saved → ${reportFilename}`);
 
