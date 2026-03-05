@@ -27,6 +27,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 let cachedEvents: EventWithLeague[] | null = null;
 let cachedAt = 0;
+let inflightFetch: Promise<EventWithLeague[]> | null = null;
 
 export async function getUpcomingEvents(
   leagueKeys?: string[]
@@ -36,6 +37,18 @@ export async function getUpcomingEvents(
     return filterByLeagues(cachedEvents, leagueKeys);
   }
 
+  // Deduplicate concurrent requests — reuse in-flight fetch
+  if (!inflightFetch) {
+    inflightFetch = fetchAllEvents().finally(() => {
+      inflightFetch = null;
+    });
+  }
+
+  const events = await inflightFetch;
+  return filterByLeagues(events, leagueKeys);
+}
+
+async function fetchAllEvents(): Promise<EventWithLeague[]> {
   const apiKey = process.env.THE_ODDS_API_KEY?.trim();
   if (!apiKey) {
     throw new Error('THE_ODDS_API_KEY is not set');
@@ -68,9 +81,9 @@ export async function getUpcomingEvents(
   );
 
   cachedEvents = allEvents;
-  cachedAt = now;
+  cachedAt = Date.now();
 
-  return filterByLeagues(allEvents, leagueKeys);
+  return allEvents;
 }
 
 function filterByLeagues(

@@ -106,6 +106,7 @@ class JobManagerImpl {
     job.error = error;
     job.updatedAt = Date.now();
     this.emitters.get(id)?.emit('error', error);
+    this.cleanupEmitter(id);
   }
 
   setComplete(id: string): void {
@@ -117,6 +118,15 @@ class JobManagerImpl {
       reportPath: job.reportPath,
       analysisPath: job.analysisPath,
     });
+    this.cleanupEmitter(id);
+  }
+
+  private cleanupEmitter(id: string): void {
+    const emitter = this.emitters.get(id);
+    if (emitter) {
+      emitter.removeAllListeners();
+      this.emitters.delete(id);
+    }
   }
 
   /** Wait until it's this job's turn to run. Only one job runs at a time. */

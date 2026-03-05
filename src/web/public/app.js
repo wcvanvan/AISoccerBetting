@@ -16,6 +16,10 @@ let eventSource = null;
 // ── Page navigation ─────────────────────────────────────────────────────────
 
 function showPage(page) {
+  // Clean up resources when leaving results page
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  if (eventSource) { eventSource.close(); eventSource = null; }
+
   document.querySelectorAll('.page').forEach((el) => el.classList.remove('active'));
   document.querySelectorAll('nav a').forEach((el) => el.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
@@ -32,9 +36,7 @@ async function loadEvents() {
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading matches...</div>';
 
   try {
-    const params = new URLSearchParams();
-    activeLeagues.forEach((l) => params.append('league', l));
-    const resp = await fetch('/api/events?' + params.toString());
+    const resp = await fetch('/api/events');
     const data = await resp.json();
 
     if (data.error) {
@@ -44,7 +46,8 @@ async function loadEvents() {
 
     eventsData = data.events || [];
     renderLeagueFilters(data.leagues || []);
-    renderEvents(eventsData);
+    const filtered = eventsData.filter((e) => activeLeagues.has(e.league_key));
+    renderEvents(filtered);
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><h3>Failed to load</h3><p>' + esc(err.message) + '</p></div>';
   }
@@ -76,7 +79,9 @@ function toggleLeague(key) {
   document.querySelectorAll('.filter-chip').forEach((chip) => {
     chip.classList.toggle('active', activeLeagues.has(chip.dataset.league));
   });
-  loadEvents();
+  // Filter client-side instead of re-fetching from API
+  const filtered = eventsData.filter((e) => activeLeagues.has(e.league_key));
+  renderEvents(filtered);
 }
 
 function renderEvents(events) {
@@ -437,7 +442,7 @@ async function renderResults(jobId) {
   try {
     const resp = await fetch('/api/analysis/' + jobId);
     const job = await resp.json();
-    hasAnalysis = !!job.analysisPath;
+    hasAnalysis = !!job.hasAnalysis;
   } catch (_) {}
 
   resultsEl.innerHTML = '';

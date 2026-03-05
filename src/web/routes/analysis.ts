@@ -71,6 +71,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Job not found' };
     }
 
+    reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -118,22 +119,25 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     const onStatus = (data: unknown) => send('status', data);
     const onLog = (message: string) =>
       send('log', { message, time: Date.now() });
-    const onComplete = (data: unknown) => {
-      send('complete', data);
-      cleanup();
-      reply.raw.end();
-    };
-    const onError = (error: string) => {
-      send('error', { error });
-      cleanup();
-      reply.raw.end();
-    };
-
+    let cleaned = false;
     const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       emitter.off('status', onStatus);
       emitter.off('log', onLog);
       emitter.off('complete', onComplete);
       emitter.off('error', onError);
+    };
+
+    const onComplete = (data: unknown) => {
+      send('complete', data);
+      cleanup();
+      if (!reply.raw.writableEnded) reply.raw.end();
+    };
+    const onError = (error: string) => {
+      send('error', { error });
+      cleanup();
+      if (!reply.raw.writableEnded) reply.raw.end();
     };
 
     emitter.on('status', onStatus);
@@ -181,8 +185,8 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       status: job.status,
       error: job.error,
       logs: job.logs,
-      reportPath: job.reportPath,
-      analysisPath: job.analysisPath,
+      hasReport: !!job.reportPath,
+      hasAnalysis: !!job.analysisPath,
       createdAt: job.createdAt,
     };
   });

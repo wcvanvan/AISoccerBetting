@@ -4,12 +4,19 @@
 
 import * as fs from 'fs';
 import { FastifyInstance } from 'fastify';
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import { jobManager } from '../services/job-manager';
+
+/** Marked instance configured to strip raw HTML (XSS prevention) */
+const safeMarked = new Marked({
+  renderer: {
+    html: () => '', // Strip raw HTML blocks
+  },
+});
 
 /** Wrap <table> elements in a scrollable container for wide data tables */
 function wrapTables(html: string): string {
-  return html.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>');
+  return html.replace(/<table[^>]*>/g, '<div class="table-wrap">$&').replace(/<\/table>/g, '</table></div>');
 }
 
 export async function reportsRoutes(app: FastifyInstance): Promise<void> {
@@ -29,7 +36,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const markdown = fs.readFileSync(job.reportPath, 'utf8');
-    const html = wrapTables(await marked(markdown));
+    const html = wrapTables(await safeMarked.parse(markdown));
     return { html, markdown };
   });
 
@@ -49,7 +56,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const markdown = fs.readFileSync(job.analysisPath, 'utf8');
-    const html = wrapTables(await marked(markdown));
+    const html = wrapTables(await safeMarked.parse(markdown));
     return { html, markdown };
   });
 
@@ -70,7 +77,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
 
     const markdown = fs.readFileSync(job.analysisPath, 'utf8');
     const concise = extractValuePicks(markdown);
-    const html = wrapTables(await marked(concise));
+    const html = wrapTables(await safeMarked.parse(concise));
     return { html, markdown: concise };
   });
 }
