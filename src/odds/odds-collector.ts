@@ -9,7 +9,7 @@
  */
 
 import { OddsApiClient } from './odds-api-client';
-import { OddsEvent, MatchOdds, CornerMarket, BookmakerOdds } from './types';
+import { OddsEvent, MatchOdds, MarketGroup, BookmakerOdds } from './types';
 import { MarketConfig, CORNER_MARKET_CONFIG } from './market-config';
 
 const DEFAULT_SPORT_KEYS = ['soccer_epl', 'soccer_uefa_champs_league'];
@@ -84,7 +84,7 @@ export class OddsCollector {
   /**
    * Fetch odds using the configured market keys.
    */
-  private async fetchFilteredOdds(sportKey: string, eventId: string): Promise<CornerMarket[]> {
+  private async fetchFilteredOdds(sportKey: string, eventId: string): Promise<MarketGroup[]> {
     const bookmakers = resolveBookmakers();
     const regions    = resolveRegions();
     const opts       = bookmakers ? { bookmakers } : { regions };
@@ -93,8 +93,7 @@ export class OddsCollector {
       sportKey, eventId, this.marketConfig.keys.join(','), opts
     );
 
-    // Aggregate into CornerMarket[]
-    const marketMap = new Map<string, CornerMarket>();
+    const marketMap = new Map<string, MarketGroup>();
     for (const bm of oddsResp.bookmakers ?? []) {
       for (const market of bm.markets ?? []) {
         if (!marketMap.has(market.key)) {

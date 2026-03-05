@@ -21,6 +21,7 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { TavilySearch } from '@langchain/tavily';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
+import { stripCodeFences } from './strip-code-fences';
 import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './prompts/report-analysis-system-prompt';
 import { getCachedResponse, setCachedResponse } from '../cache';
 
@@ -169,13 +170,3 @@ async function withTimeoutAndProgress<T>(
   }
 }
 
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.startsWith('```') && trimmed.includes('\n')) {
-    const afterFirst = trimmed.slice(3).replace(/^[\w]*\n?/, '');
-    const end = afterFirst.lastIndexOf('```');
-    if (end !== -1) return afterFirst.slice(0, end).trim();
-    return afterFirst.trim();
-  }
-  return trimmed;
-}

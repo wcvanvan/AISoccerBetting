@@ -2,7 +2,7 @@
  * Main orchestrator for match data collection.
  * Coordinates data fetching (via DataProvider), odds, and formatting.
  *
- * Parameterised by MarketConfig to support both corner and goal pipelines.
+ * Parameterised by MarketConfig to support corner, goal, and card pipelines.
  */
 
 import { DataProvider } from '../provider/data-provider';

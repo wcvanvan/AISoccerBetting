@@ -16,6 +16,7 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { TavilySearch } from '@langchain/tavily';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
+import { stripCodeFences } from './strip-code-fences';
 import { MATCH_NEWS_SYSTEM_PROMPT } from './prompts/match-news-system-prompt';
 
 function buildUserMessage(teamA: string, teamB: string, matchDate: string): string {
@@ -43,7 +44,7 @@ export async function runMatchNews(
 
   const userMessage = buildUserMessage(teamA, teamB, matchDate);
 
-  const model = process.env.WEB_SEARCH_MODEL?.trim();
+  const model = process.env.WEB_SEARCH_MODEL?.trim() || 'claude-sonnet-4-6';
   const llm = new ChatAnthropic({ model, apiKey });
   const tavilyTool = new TavilySearch({ maxResults: 5 });
 
@@ -76,13 +77,3 @@ export async function runMatchNews(
   throw new Error('Agent returned no text content.');
 }
 
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.startsWith('```') && trimmed.includes('\n')) {
-    const afterFirst = trimmed.slice(3).replace(/^[\w]*\n?/, '');
-    const end = afterFirst.lastIndexOf('```');
-    if (end !== -1) return afterFirst.slice(0, end).trim();
-    return afterFirst.trim();
-  }
-  return trimmed;
-}

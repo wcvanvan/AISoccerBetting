@@ -1,5 +1,5 @@
 /**
- * Types for The Odds API v4 responses and the corner odds domain model.
+ * Types for The Odds API v4 responses and the betting odds domain model.
  * Docs: https://the-odds-api.com/liveapi/guides/v4/
  */
 
@@ -51,20 +51,20 @@ export interface BookmakerOdds {
   outcomes: { name: string; price: number; point?: number }[];
 }
 
-export interface CornerMarket {
-  /** Market key from The Odds API, e.g. "corners", "h1_corners" */
+export interface MarketGroup {
+  /** Market key from The Odds API, e.g. "alternate_totals_corners", "h2h", "btts" */
   key: string;
   bookmakers: BookmakerOdds[];
 }
 
-export interface MatchCornerOdds {
+export interface MatchOdds {
   /** True if the event was found in The Odds API */
   found: boolean;
   /** Populated when found is true */
   homeTeam?: string;
   awayTeam?: string;
-  markets: CornerMarket[];
+  markets: MarketGroup[];
 }
 
-/** Generic alias — same shape for any market (corners, goals, etc.) */
-export type MatchOdds = MatchCornerOdds;
+/** @deprecated Use MarketGroup instead */
+export type CornerMarket = MarketGroup;
