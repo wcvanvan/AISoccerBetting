@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soccer Betting Analyzer</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <a href="#" class="logo" onclick="showPage('matches')">Soccer<span>Bet</span></a>
+      <nav>
+        <a href="#" class="active" data-page="matches" onclick="showPage('matches')">Matches</a>
+        <a href="#" data-page="results" onclick="showPage('results')">Results</a>
+        <a href="#" data-page="history" onclick="showPage('history')">History</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <!-- Matches Page -->
+      <div id="page-matches" class="page active">
+        <h2 class="section-title">Upcoming Matches</h2>
+
+        <div class="filters" id="league-filters"></div>
+
+        <div id="events-container">
+          <div class="loading">
+            <span class="spinner"></span>
+            Loading matches...
+          </div>
+        </div>
+      </div>
+
+      <!-- Results Page -->
+      <div id="page-results" class="page">
+        <div id="results-container">
+          <div class="empty-state">
+            <h3>No active analysis</h3>
+            <p>Select a match and click "Analyze" to get started.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- History Page -->
+      <div id="page-history" class="page">
+        <h2 class="section-title">Analysis History</h2>
+        <div id="history-container">
+          <div class="loading">
+            <span class="spinner"></span>
+            Loading history...
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
