@@ -42,6 +42,37 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     if (!body.force) {
       const cached = getCachedPaths(homeTeam, awayTeam, date, market);
       if (cached.reportPath) {
+        const analyze = body.analyze !== false;
+
+        // Report exists but no analysis, and user wants analysis → run analysis only
+        if (analyze && !cached.analysisPath) {
+          if (request.user?.role !== 'admin') {
+            reply.status(403);
+            return { error: 'Read-only access. Only admin can run analyses.' };
+          }
+
+          // Check for duplicate running job
+          const existing = jobManager.getAll().find(
+            (j) =>
+              j.homeTeam === homeTeam &&
+              j.awayTeam === awayTeam &&
+              j.date === date &&
+              j.market === market &&
+              !['complete', 'failed'].includes(j.status)
+          );
+          if (existing) {
+            return { jobId: existing.id, status: existing.status, duplicate: true };
+          }
+
+          const job = jobManager.create(homeTeam, awayTeam, date, market);
+          job.reportPath = cached.reportPath;
+          job.logs.push({ time: Date.now(), message: 'Using cached data report, skipping collection' });
+
+          runPipelineForJob(job, true).catch(() => {});
+          return { jobId: job.id, status: job.status };
+        }
+
+        // Fully cached (report + optional analysis) → return immediately
         const job = jobManager.create(homeTeam, awayTeam, date, market);
         job.reportPath = cached.reportPath;
         job.analysisPath = cached.analysisPath;

@@ -94,7 +94,10 @@ export async function runPipelineForJob(
   try {
     await jobManager.enqueue(job.id);
 
-    await collectData(job);
+    // Skip collection if report already cached (e.g. from a previous collect-only run)
+    if (!job.reportPath) {
+      await collectData(job);
+    }
 
     if (analyze && job.reportPath) {
       await runAnalysis(job);

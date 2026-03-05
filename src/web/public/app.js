@@ -505,7 +505,7 @@ async function startJob(homeTeam, awayTeam, date, market, analyze) {
     const resp = await fetch('/api/analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze, force: true }),
+      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze }),
     });
     const data = await resp.json();
 
