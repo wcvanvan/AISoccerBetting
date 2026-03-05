@@ -105,7 +105,7 @@ export class MarkdownFormatter {
 
       // Goal-mode stats inline
       if (isGoalMode) {
-        line1 += this.formatGoalStatsInline(m.stats, m.opponent_stats);
+        line1 += this.formatGoalStatsInline(m.stats, m.opponent_stats, m.extras);
       }
 
       // Card-mode stats inline (prefer event counts over boxscore when boxscore is 0)
@@ -113,9 +113,9 @@ export class MarkdownFormatter {
         line1 += this.formatCardStatsInline(m.stats, m.opponent_stats, m.card_events, m.opponent_card_events);
       }
 
-      // Render extras if present (skip xG/xGA in goal mode — already shown inline)
+      // Render extras if present (skip metrics already shown inline in goal mode)
       if (m.extras && Object.keys(m.extras).length > 0) {
-        const skip = isGoalMode ? new Set(['xG', 'xGA']) : undefined;
+        const skip = isGoalMode ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep']) : undefined;
         const extrasStr = this.formatExtras(m.extras, skip);
         if (extrasStr) line1 += ` · ${extrasStr}`;
       }
@@ -157,6 +157,7 @@ export class MarkdownFormatter {
   private formatGoalStatsInline(
     stats: MatchStats | null | undefined,
     oppStats: MatchStats | null | undefined,
+    extras?: Record<string, string | number | null>,
   ): string {
     const parts: string[] = [];
 
@@ -164,6 +165,15 @@ export class MarkdownFormatter {
     const xgO = oppStats?.expected_goals;
     if (xgT != null) {
       parts.push(xgO != null ? `xG ${xgT.toFixed(2)}-${xgO.toFixed(2)}` : `xG ${xgT.toFixed(2)}`);
+    }
+
+    // npxG (non-penalty xG) from extras
+    const npxgT = extras?.npxG;
+    const npxgO = extras?.npxGA;
+    if (npxgT != null && typeof npxgT === 'number') {
+      parts.push(npxgO != null && typeof npxgO === 'number'
+        ? `npxG ${npxgT.toFixed(2)}-${npxgO.toFixed(2)}`
+        : `npxG ${npxgT.toFixed(2)}`);
     }
 
     const shT = stats?.shots;
@@ -178,6 +188,24 @@ export class MarkdownFormatter {
       } else {
         parts.push(`Sh ${tPart}`);
       }
+    }
+
+    // PPDA (pressing intensity)
+    const ppdaT = extras?.PPDA;
+    const ppdaO = extras?.oppPPDA;
+    if (ppdaT != null && typeof ppdaT === 'number') {
+      parts.push(ppdaO != null && typeof ppdaO === 'number'
+        ? `PPDA ${ppdaT}-${ppdaO}`
+        : `PPDA ${ppdaT}`);
+    }
+
+    // Deep completions
+    const deepT = extras?.deep;
+    const deepO = extras?.oppDeep;
+    if (deepT != null && typeof deepT === 'number') {
+      parts.push(deepO != null && typeof deepO === 'number'
+        ? `Deep ${deepT}-${deepO}`
+        : `Deep ${deepT}`);
     }
 
     return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
@@ -296,8 +324,8 @@ export class MarkdownFormatter {
         header += this.formatH2HCardStats(m, teamA, teamB);
       }
 
-      // Render extras if present (skip xG in goal mode — already shown inline)
-      const skipKeys = isGoalMode ? new Set(['xG', 'xGA']) : undefined;
+      // Render extras if present (skip metrics already shown inline in goal mode)
+      const skipKeys = isGoalMode ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep']) : undefined;
       if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
         const s = this.formatExtras(m.teamA_extras, skipKeys);
         if (s) header += ` · ${teamA}: ${s}`;
@@ -338,6 +366,14 @@ export class MarkdownFormatter {
     if (xgA != null && xgB != null) {
       parts.push(`xG ${teamA} ${xgA.toFixed(2)}, ${teamB} ${xgB.toFixed(2)}`);
     }
+
+    // npxG from extras
+    const npxgA = m.teamA_extras?.npxG;
+    const npxgB = m.teamB_extras?.npxG;
+    if (npxgA != null && typeof npxgA === 'number' && npxgB != null && typeof npxgB === 'number') {
+      parts.push(`npxG ${teamA} ${npxgA.toFixed(2)}, ${teamB} ${npxgB.toFixed(2)}`);
+    }
+
     const shA = m.teamA_stats?.shots;
     const shB = m.teamB_stats?.shots;
     if (shA != null && shB != null) {
@@ -347,6 +383,21 @@ export class MarkdownFormatter {
       const b = sotB != null ? `${shB}(${sotB})` : `${shB}`;
       parts.push(`Sh ${a}-${b}`);
     }
+
+    // PPDA from extras
+    const ppdaA = m.teamA_extras?.PPDA;
+    const ppdaB = m.teamB_extras?.PPDA;
+    if (ppdaA != null && typeof ppdaA === 'number' && ppdaB != null && typeof ppdaB === 'number') {
+      parts.push(`PPDA ${ppdaA}-${ppdaB}`);
+    }
+
+    // Deep completions from extras
+    const deepA = m.teamA_extras?.deep;
+    const deepB = m.teamB_extras?.deep;
+    if (deepA != null && typeof deepA === 'number' && deepB != null && typeof deepB === 'number') {
+      parts.push(`Deep ${deepA}-${deepB}`);
+    }
+
     return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
   }
 
@@ -378,6 +429,12 @@ export class MarkdownFormatter {
   private static readonly EXTRAS_LABELS: Record<string, string> = {
     xG: 'xG',
     xGA: 'xGA',
+    npxG: 'npxG',
+    npxGA: 'npxGA',
+    PPDA: 'PPDA',
+    oppPPDA: 'oppPPDA',
+    deep: 'Deep',
+    oppDeep: 'oppDeep',
     possession: 'Poss',
     saves: 'Saves',
     shots: 'Shots',

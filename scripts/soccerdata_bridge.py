@@ -995,13 +995,25 @@ class DataAssembler:
                 if not is_home and not is_away:
                     continue
 
-                # Team's xG and opponent's xG
+                # Team's and opponent's stats based on home/away
                 if is_home:
                     team_xg = row.get("home_xg")
                     opp_xg = row.get("away_xg")
+                    team_np_xg = row.get("home_np_xg")
+                    opp_np_xg = row.get("away_np_xg")
+                    team_ppda = row.get("home_ppda")
+                    opp_ppda = row.get("away_ppda")
+                    team_deep = row.get("home_deep_completions")
+                    opp_deep = row.get("away_deep_completions")
                 else:
                     team_xg = row.get("away_xg")
                     opp_xg = row.get("home_xg")
+                    team_np_xg = row.get("away_np_xg")
+                    opp_np_xg = row.get("home_np_xg")
+                    team_ppda = row.get("away_ppda")
+                    opp_ppda = row.get("home_ppda")
+                    team_deep = row.get("away_deep_completions")
+                    opp_deep = row.get("home_deep_completions")
 
                 extras = match.setdefault("extras", {}) or {}
                 match["extras"] = extras
@@ -1019,6 +1031,25 @@ class DataAssembler:
                         match["opponent_stats"] = {}
                     if match["opponent_stats"].get("expected_goals") is None:
                         match["opponent_stats"]["expected_goals"] = xga_val
+
+                # npxG (non-penalty xG)
+                if team_np_xg is not None and not pd.isna(team_np_xg):
+                    extras["npxG"] = round(float(team_np_xg), 2)
+                if opp_np_xg is not None and not pd.isna(opp_np_xg):
+                    extras["npxGA"] = round(float(opp_np_xg), 2)
+
+                # PPDA (pressing intensity — lower = more aggressive)
+                if team_ppda is not None and not pd.isna(team_ppda):
+                    extras["PPDA"] = round(float(team_ppda), 1)
+                if opp_ppda is not None and not pd.isna(opp_ppda):
+                    extras["oppPPDA"] = round(float(opp_ppda), 1)
+
+                # Deep completions (passes into zone near opponent's box)
+                if team_deep is not None and not pd.isna(team_deep):
+                    extras["deep"] = int(team_deep)
+                if opp_deep is not None and not pd.isna(opp_deep):
+                    extras["oppDeep"] = int(opp_deep)
+
                 break
 
         return matches
@@ -1061,29 +1092,39 @@ class DataAssembler:
                 home_xg = row.get("home_xg")
                 away_xg = row.get("away_xg")
 
-                # Assign xG to team_a
-                a_xg = home_xg if a_is_home else away_xg
-                if a_xg is not None and not pd.isna(a_xg):
-                    xg_val = round(float(a_xg), 2)
-                    if match.get("teamA_extras") is None:
-                        match["teamA_extras"] = {}
-                    match["teamA_extras"]["xG"] = xg_val
-                    if match.get("teamA_stats") is None:
-                        match["teamA_stats"] = {}
-                    if match["teamA_stats"].get("expected_goals") is None:
-                        match["teamA_stats"]["expected_goals"] = xg_val
+                # Helper to enrich a team's extras dict
+                def _enrich_team_h2h(team_key: str, is_home: bool):
+                    xg = home_xg if is_home else away_xg
+                    side = "home" if is_home else "away"
+                    extras_key = f"{team_key}_extras"
+                    stats_key = f"{team_key}_stats"
 
-                # Assign xG to team_b
-                b_xg = home_xg if b_is_home else away_xg
-                if b_xg is not None and not pd.isna(b_xg):
-                    xg_val = round(float(b_xg), 2)
-                    if match.get("teamB_extras") is None:
-                        match["teamB_extras"] = {}
-                    match["teamB_extras"]["xG"] = xg_val
-                    if match.get("teamB_stats") is None:
-                        match["teamB_stats"] = {}
-                    if match["teamB_stats"].get("expected_goals") is None:
-                        match["teamB_stats"]["expected_goals"] = xg_val
+                    if match.get(extras_key) is None:
+                        match[extras_key] = {}
+                    if match.get(stats_key) is None:
+                        match[stats_key] = {}
+                    ext = match[extras_key]
+
+                    if xg is not None and not pd.isna(xg):
+                        xg_val = round(float(xg), 2)
+                        ext["xG"] = xg_val
+                        if match[stats_key].get("expected_goals") is None:
+                            match[stats_key]["expected_goals"] = xg_val
+
+                    np_xg = row.get(f"{side}_np_xg")
+                    if np_xg is not None and not pd.isna(np_xg):
+                        ext["npxG"] = round(float(np_xg), 2)
+
+                    ppda = row.get(f"{side}_ppda")
+                    if ppda is not None and not pd.isna(ppda):
+                        ext["PPDA"] = round(float(ppda), 1)
+
+                    deep = row.get(f"{side}_deep_completions")
+                    if deep is not None and not pd.isna(deep):
+                        ext["deep"] = int(deep)
+
+                _enrich_team_h2h("teamA", a_is_home)
+                _enrich_team_h2h("teamB", b_is_home)
                 break
 
         return h2h_matches
