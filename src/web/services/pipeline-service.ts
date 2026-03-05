@@ -25,6 +25,7 @@ interface MarketPipelineConfig {
   marketConfig: MarketConfig;
   formatOptions: Partial<FormatOptions>;
   toolName: string;
+  marketLabel: string;
 }
 
 const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
@@ -32,16 +33,19 @@ const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
     marketConfig: CORNER_MARKET_CONFIG,
     formatOptions: { showCorners: true, oddsLabel: 'Corner' },
     toolName: 'corners',
+    marketLabel: 'corner',
   },
   goals: {
     marketConfig: GOAL_MARKET_CONFIG,
     formatOptions: { showCorners: false, oddsLabel: 'Goal' },
     toolName: 'goals',
+    marketLabel: 'goal',
   },
   cards: {
     marketConfig: CARD_MARKET_CONFIG,
     formatOptions: { showCorners: false, oddsLabel: 'Card' },
     toolName: 'cards',
+    marketLabel: 'card',
   },
 };
 
@@ -63,7 +67,6 @@ export async function runPipelineForJob(
   job: Job,
   analyze: boolean
 ): Promise<void> {
-  // Ensure reports directory exists
   if (!fs.existsSync(REPORTS_DIR)) {
     fs.mkdirSync(REPORTS_DIR, { recursive: true });
   }
@@ -71,13 +74,11 @@ export async function runPipelineForJob(
   try {
     await jobManager.enqueue(job.id);
 
-    // Phase 1: Data collection
     await collectData(job);
 
-    // Phase 2: Analysis (if requested)
     if (analyze && job.reportPath) {
       await runAnalysis(job);
-    } else if (!analyze) {
+    } else {
       jobManager.setComplete(job.id);
     }
   } catch (err) {
@@ -105,7 +106,7 @@ async function collectData(job: Job): Promise<void> {
       config.formatOptions
     );
 
-    jobManager.addLog(job.id, 'Fetching team data from ESPN...');
+    jobManager.addLog(job.id, 'Resolving team IDs and fetching match data...');
 
     const markdown = await collector.collect_data({
       teamA_name: job.homeTeam,
@@ -140,37 +141,45 @@ async function runAnalysis(job: Job): Promise<void> {
     'Starting analysis via Claude Code agent...'
   );
 
+  const config = MARKET_CONFIGS[job.market];
   const analysisPath = job.reportPath!.replace(/\.md$/, '-analysis.md');
-  const reportContent = fs.readFileSync(job.reportPath!, 'utf8');
 
-  const marketLabel =
-    job.market === 'goals'
-      ? 'goal'
-      : job.market === 'corners'
-      ? 'corner'
-      : 'card';
-
+  // Build the prompt referencing the file path — avoid inlining large report content in CLI args
   const prompt = [
-    `Read the match data report below and write a comprehensive ${marketLabel} market betting analysis.`,
-    `Save the analysis to the file: ${analysisPath}`,
+    `You are a soccer betting analyst. Read the match data report at:`,
+    `${job.reportPath}`,
     ``,
-    `The report content:`,
+    `Write a comprehensive ${config.marketLabel} market betting analysis.`,
+    `Focus on identifying value bets with clear reasoning.`,
+    `Include a "## Recommended Bets" section at the end with your top picks.`,
     ``,
-    reportContent,
+    `Save the analysis directly to: ${analysisPath}`,
   ].join('\n');
 
   return new Promise<void>((resolve, reject) => {
+    // Use --print and pipe prompt via stdin to avoid OS arg length limits
     const child = spawn(
       'claude',
-      ['--print', '--output-format', 'text', prompt],
+      ['--print', '--output-format', 'text'],
       {
         cwd: PROJECT_ROOT,
         env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       }
     );
 
     let stdout = '';
+    let timedOut = false;
+
+    // 10-minute timeout
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, 10 * 60 * 1000);
+
+    // Send prompt via stdin
+    child.stdin.write(prompt);
+    child.stdin.end();
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -184,14 +193,23 @@ async function runAnalysis(job: Job): Promise<void> {
     });
 
     child.on('error', (err) => {
+      clearTimeout(timeout);
       reject(
         new Error(
-          `Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code. Error: ${err.message}`
+          `Claude Code CLI not found. Install it: npm install -g @anthropic-ai/claude-code. ${err.message}`
         )
       );
     });
 
     child.on('exit', (code) => {
+      clearTimeout(timeout);
+
+      if (timedOut) {
+        reject(new Error('Analysis timed out after 10 minutes'));
+        return;
+      }
+
+      // Claude --print outputs the analysis to stdout; save it
       if (stdout.trim()) {
         fs.writeFileSync(analysisPath, stdout.trim(), 'utf8');
       }
@@ -202,10 +220,10 @@ async function runAnalysis(job: Job): Promise<void> {
         resolve();
       } else if (code !== 0) {
         reject(
-          new Error(`Claude Code exited with code ${code}. Analysis file was not created.`)
+          new Error(`Claude Code exited with code ${code}`)
         );
       } else {
-        reject(new Error('Analysis file was not created'));
+        reject(new Error('Analysis produced no output'));
       }
     });
   });

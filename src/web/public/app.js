@@ -87,6 +87,10 @@ function renderEvents(events) {
     return;
   }
 
+  // Update match count in heading
+  const heading = document.querySelector('#page-matches .section-title');
+  if (heading) heading.innerHTML = 'Upcoming Matches <span class="match-count">(' + events.length + ')</span>';
+
   // Custom match form
   const customForm = document.createElement('div');
   customForm.className = 'card';
@@ -191,7 +195,7 @@ function renderEvents(events) {
     btnAnalyze.textContent = 'Analyze';
     btnAnalyze.addEventListener('click', () => {
       const market = select.value;
-      startJob(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, true);
+      startJob(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, true, btnAnalyze);
     });
 
     const btnCollect = document.createElement('button');
@@ -200,7 +204,7 @@ function renderEvents(events) {
     btnCollect.style.marginLeft = '6px';
     btnCollect.addEventListener('click', () => {
       const market = select.value;
-      startJob(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, false);
+      startJob(e.home_team, e.away_team, e.commence_time.slice(0, 10), market, false, btnCollect);
     });
 
     tdActions.append(btnAnalyze, btnCollect);
@@ -214,7 +218,11 @@ function renderEvents(events) {
 
 // ── Analysis ────────────────────────────────────────────────────────────────
 
-async function startJob(homeTeam, awayTeam, date, market, analyze) {
+async function startJob(homeTeam, awayTeam, date, market, analyze, triggerBtn) {
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.classList.add('loading');
+  }
   try {
     const resp = await fetch('/api/analysis', {
       method: 'POST',
@@ -358,15 +366,27 @@ async function renderResults(jobId) {
   const resultsEl = document.getElementById('job-results-' + jobId);
   if (!resultsEl) return;
 
+  // Fetch job details to determine available tabs
+  let hasAnalysis = false;
+  try {
+    const resp = await fetch('/api/analysis/' + jobId);
+    const job = await resp.json();
+    hasAnalysis = !!job.analysisPath;
+  } catch (_) {}
+
   resultsEl.innerHTML = '';
 
   const tabs = document.createElement('div');
   tabs.className = 'tabs';
-  const tabDefs = [
-    { key: 'concise', label: 'Value Picks' },
-    { key: 'analysis', label: 'Full Analysis' },
-    { key: 'raw', label: 'Data Report' },
-  ];
+
+  const tabDefs = hasAnalysis
+    ? [
+        { key: 'concise', label: 'Value Picks' },
+        { key: 'analysis', label: 'Full Analysis' },
+        { key: 'raw', label: 'Data Report' },
+      ]
+    : [{ key: 'raw', label: 'Data Report' }];
+
   tabDefs.forEach((t, i) => {
     const btn = document.createElement('button');
     btn.className = 'tab' + (i === 0 ? ' active' : '');
@@ -383,7 +403,7 @@ async function renderResults(jobId) {
   content.id = 'tab-content-' + jobId;
 
   resultsEl.append(tabs, content);
-  await loadTabContent(jobId, 'concise');
+  await loadTabContent(jobId, tabDefs[0].key);
 }
 
 async function loadTabContent(jobId, tab) {

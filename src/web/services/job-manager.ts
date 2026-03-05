@@ -1,6 +1,7 @@
 /**
  * JobManager — tracks analysis jobs (data collection + analysis).
  * In-memory store with EventEmitter for SSE progress streaming.
+ * Includes a serial queue so only one job runs at a time.
  */
 
 import { EventEmitter } from 'events';
@@ -34,9 +35,10 @@ export interface Job {
 class JobManagerImpl {
   private jobs = new Map<string, Job>();
   private emitters = new Map<string, EventEmitter>();
-  private queue: string[] = [];
+
+  // Serial queue: resolvers waiting for their turn
+  private waiters: Array<() => void> = [];
   private running = false;
-  private runNext: (() => void) | null = null;
 
   create(
     homeTeam: string,
@@ -117,35 +119,29 @@ class JobManagerImpl {
     });
   }
 
-  /** Enqueue a job. Only one job runs at a time. Returns a promise that resolves when it's this job's turn. */
+  /** Wait until it's this job's turn to run. Only one job runs at a time. */
   async enqueue(id: string): Promise<void> {
     if (!this.running) {
       this.running = true;
       return;
     }
-    this.queue.push(id);
-    this.addLog(id, `Queued (position ${this.queue.length})`);
+
+    const position = this.waiters.length + 1;
+    this.addLog(id, `Queued (position ${position})`);
+
     return new Promise<void>((resolve) => {
-      const check = () => {
-        const idx = this.queue.indexOf(id);
-        if (idx === 0 && !this.running) {
-          this.queue.shift();
-          this.running = true;
-          resolve();
-        }
-      };
-      // Store callback so dequeue can trigger it
-      const interval = setInterval(() => {
-        check();
-        if (this.running && !this.queue.includes(id)) {
-          clearInterval(interval);
-        }
-      }, 500);
+      this.waiters.push(resolve);
     });
   }
 
+  /** Release the lock so the next queued job can start. */
   dequeue(): void {
-    this.running = false;
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+    } else {
+      this.running = false;
+    }
   }
 }
 
