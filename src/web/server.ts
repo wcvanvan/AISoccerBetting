@@ -42,7 +42,7 @@ function resolvePublicDir(): string {
 }
 
 export async function createServer() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: false });
 
   // Cookie support
   await app.register(fastifyCookie);

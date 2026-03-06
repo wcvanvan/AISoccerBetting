@@ -17,7 +17,7 @@ import {
   MarketConfig,
 } from '../../odds';
 import { FormatOptions } from '../../formatter';
-import { buildReportFilename } from '../../cli-shared';
+import { buildReportFilename, buildMatchDir } from '../../cli-shared';
 import { jobManager, Job, MarketType } from './job-manager';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
@@ -59,12 +59,16 @@ export function getCachedPaths(
   market: MarketType
 ): { reportPath: string | null; analysisPath: string | null } {
   const config = MARKET_CONFIGS[market];
-  const filename = buildReportFilename(homeTeam, awayTeam, date, config.toolName);
+  // New layout: data/reports/{matchDir}/{market}.md
+  const relPath = buildReportFilename(homeTeam, awayTeam, date, config.toolName);
+  // Old flat layout: data/reports/{slug}-vs-{slug}-{date}-{market}.md
+  const matchDir = buildMatchDir(homeTeam, awayTeam, date);
+  const oldFlat = `${matchDir}-${config.toolName}.md`;
 
-  // Check data/reports/ first, then project root (CLI-generated reports)
   const candidates = [
-    path.join(REPORTS_DIR, filename),
-    path.join(PROJECT_ROOT, filename),
+    path.join(REPORTS_DIR, relPath),
+    path.join(REPORTS_DIR, oldFlat),
+    path.join(PROJECT_ROOT, oldFlat),
   ];
 
   for (const reportPath of candidates) {
@@ -137,13 +141,15 @@ async function collectData(job: Job): Promise<void> {
       match_date: job.date,
     });
 
-    const filename = buildReportFilename(
+    const relPath = buildReportFilename(
       job.homeTeam,
       job.awayTeam,
       job.date,
       config.toolName
     );
-    const reportPath = path.join(REPORTS_DIR, filename);
+    const reportPath = path.join(REPORTS_DIR, relPath);
+    const reportDir = path.dirname(reportPath);
+    if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
     fs.writeFileSync(reportPath, markdown, 'utf8');
 
     job.reportPath = reportPath;

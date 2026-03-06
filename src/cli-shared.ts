@@ -170,8 +170,14 @@ export function slug(s: string): string {
   return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
+/** Match directory name: {slug-a}-vs-{slug-b}-{date} */
+export function buildMatchDir(teamA: string, teamB: string, date: string): string {
+  return `${slug(teamA)}-vs-${slug(teamB)}-${date}`;
+}
+
+/** Report path within a match directory: {matchDir}/{market}.md */
 export function buildReportFilename(teamA: string, teamB: string, date: string, market: string): string {
-  return `${slug(teamA)}-vs-${slug(teamB)}-${date}-${market}.md`;
+  return path.join(buildMatchDir(teamA, teamB, date), `${market}.md`);
 }
 
 function buildAnalysisFilename(reportFilename: string): string {
@@ -179,7 +185,7 @@ function buildAnalysisFilename(reportFilename: string): string {
 }
 
 function buildNewsFilename(teamA: string, teamB: string, date: string): string {
-  return `${slug(teamA)}-vs-${slug(teamB)}-${date}-news.md`;
+  return path.join(buildMatchDir(teamA, teamB, date), 'news.md');
 }
 
 // ── Analysis runner ─────────────────────────────────────────────────────────
@@ -326,6 +332,8 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
   // ── Standalone match news mode ──
   if (args.mode === 'news') {
     const newsFilename = buildNewsFilename(args.teamA, args.teamB, args.date);
+    const newsDir = path.dirname(newsFilename);
+    if (!fs.existsSync(newsDir)) fs.mkdirSync(newsDir, { recursive: true });
     try {
       console.log(`Fetching match news for ${args.teamA} vs ${args.teamB}...`);
       const news = await runMatchNews(args.teamA, args.teamB, args.date);
@@ -391,6 +399,8 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     });
 
     const reportFilename = buildReportFilename(args.teamA, args.teamB, args.date, toolName);
+    const reportDir = path.dirname(reportFilename);
+    if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
     fs.writeFileSync(reportFilename, markdown, 'utf8');
     console.log(`Report saved → ${reportFilename}`);
 
