@@ -1,6 +1,6 @@
 /**
  * Lightweight report path resolution — no heavy pipeline dependencies.
- * Used by readonly routes (reports, history) to find cached report files.
+ * Used by read-only routes (reports, history) to find cached report files.
  */
 
 import * as path from 'path';

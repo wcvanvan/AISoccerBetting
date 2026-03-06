@@ -7,7 +7,6 @@
     { "src": "/(.*)", "dest": "/api/index.ts" }
   ],
   "env": {
-    "READONLY_MODE": "1",
     "NODE_ENV": "production"
   }
 }

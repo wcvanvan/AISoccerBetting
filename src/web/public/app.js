@@ -19,7 +19,6 @@ let currentJobId = null;
 let eventSource = null;
 let elapsedTimer = null;
 let tabCache = {};
-let readonlyMode = false;
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -42,21 +41,13 @@ async function loadUser() {
   }
 }
 
-async function loadConfig() {
-  try {
-    const resp = await fetch('/api/config');
-    const data = await resp.json();
-    readonlyMode = !!data.readonly;
-  } catch (_) {}
-}
-
 async function logout() {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login.html';
 }
 
 function isAdmin() {
-  return !readonlyMode && currentUser && currentUser.role === 'admin';
+  return currentUser && currentUser.role === 'admin';
 }
 
 // ── Page navigation ─────────────────────────────────────────────────────────
@@ -1001,23 +992,14 @@ function showToast(message, type) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadUser();
-  await loadConfig();
-
-  if (readonlyMode) {
-    // Hide Matches tab in readonly mode — only History is available
-    const matchesNav = document.querySelector('nav a[data-page="matches"]');
-    if (matchesNav) matchesNav.style.display = 'none';
-    showPage('history');
-  } else {
-    loadEvents();
-  }
+  loadEvents();
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const matchPage = document.getElementById('page-match');
       if (matchPage && matchPage.classList.contains('active')) {
-        showPage(readonlyMode ? 'history' : 'matches');
+        showPage('matches');
       }
     }
   });

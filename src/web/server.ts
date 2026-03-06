@@ -24,8 +24,7 @@ declare module 'fastify' {
 }
 
 const SESSION_COOKIE = 'session';
-const PUBLIC_PATHS = ['/login.html', '/style.css', '/api/login', '/api/config'];
-const READONLY = process.env.READONLY_MODE === '1';
+const PUBLIC_PATHS = ['/login.html', '/style.css', '/api/login'];
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 // Rate limiter for login attempts (in-memory, per IP).
@@ -63,7 +62,7 @@ export async function createServer() {
   app.addHook('onRequest', async (request, reply) => {
     const urlPath = request.url.split('?')[0];
 
-    // Allow public paths (login page, css, login API, config)
+    // Allow public paths (login page, css, login API)
     if (PUBLIC_PATHS.some((p) => urlPath === p)) return;
 
     const token = request.cookies[SESSION_COOKIE];
@@ -148,26 +147,17 @@ export async function createServer() {
     };
   });
 
-  // Config endpoint — tells the frontend about readonly mode
-  app.get('/api/config', async () => {
-    return { readonly: READONLY };
-  });
-
-  // Readonly mode: only register lightweight report routes (no pipeline/events deps)
-  // Full mode: dynamically import events + analysis to avoid loading heavy deps when not needed
-  if (!READONLY) {
-    const { eventsRoutes } = await import('./routes/events');
-    const { analysisRoutes } = await import('./routes/analysis');
-    await app.register(eventsRoutes);
-    await app.register(analysisRoutes);
-  }
+  // Dynamically import events + analysis to avoid loading heavy deps at module level
+  const { eventsRoutes } = await import('./routes/events');
+  const { analysisRoutes } = await import('./routes/analysis');
+  await app.register(eventsRoutes);
+  await app.register(analysisRoutes);
   await app.register(reportsRoutes);
 
   // Health check
   app.get('/api/health', async () => {
     const checks = {
       oddsApiKey: !!process.env.THE_ODDS_API_KEY?.trim(),
-      readonly: READONLY,
     };
     return { status: 'ok', checks };
   });
