@@ -15,6 +15,12 @@ function getApp() {
 }
 
 export default async (req: VercelRequest, res: VercelResponse) => {
-  const app = await getApp();
-  app.server.emit('request', req, res);
+  try {
+    const app = await getApp();
+    app.server.emit('request', req, res);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.stack || err.message : String(err);
+    console.error('Serverless function error:', message);
+    res.status(500).json({ error: message });
+  }
 };

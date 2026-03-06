@@ -5,17 +5,22 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { FastifyInstance } from 'fastify';
-import { Marked } from 'marked';
 import { jobManager } from '../services/job-manager';
 import { getCachedPaths, REPORTS_DIR } from '../services/report-paths';
 import { MarketType } from '../services/job-manager';
 
-/** Marked instance configured to strip raw HTML (XSS prevention) */
-const safeMarked = new Marked({
-  renderer: {
-    html: () => '', // Strip raw HTML blocks
-  },
-});
+// Lazy-load marked (ESM-only package) via dynamic import
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _safeMarked: any = null;
+async function getSafeMarked() {
+  if (!_safeMarked) {
+    const { Marked } = await import('marked');
+    _safeMarked = new Marked({
+      renderer: { html: () => '' },
+    });
+  }
+  return _safeMarked;
+}
 
 /** Server-side cache: rendered HTML keyed by filepath + mtime to avoid re-parsing */
 const htmlCache = new Map<string, { mtime: number; html: string }>();
@@ -26,6 +31,7 @@ async function renderCached(filePath: string): Promise<string> {
   if (entry && entry.mtime === stat.mtimeMs) {
     return entry.html;
   }
+  const safeMarked = await getSafeMarked();
   const markdown = fs.readFileSync(filePath, 'utf8');
   const html = wrapTables(await safeMarked.parse(markdown));
   htmlCache.set(filePath, { mtime: stat.mtimeMs, html });
@@ -101,7 +107,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     if (entry && entry.mtime === stat.mtimeMs) {
       html = entry.html;
     } else {
-      html = wrapTables(await safeMarked.parse(concise));
+      html = wrapTables(await (await getSafeMarked()).parse(concise));
       htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
     }
     return { html };
@@ -171,7 +177,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     if (entry && entry.mtime === stat.mtimeMs) {
       html = entry.html;
     } else {
-      html = wrapTables(await safeMarked.parse(concise));
+      html = wrapTables(await (await getSafeMarked()).parse(concise));
       htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
     }
     return { html };

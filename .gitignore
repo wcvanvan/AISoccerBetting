@@ -13,6 +13,8 @@ src/cache/data/
 *.md
 !README.md
 !AGENTS.md
+!data/reports/**/*.md
 poisson_calc.py
 .goal-stash/
 .vscode/
+.vercel
