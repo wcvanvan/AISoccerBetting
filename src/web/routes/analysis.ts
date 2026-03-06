@@ -7,6 +7,18 @@ import { jobManager, MarketType } from '../services/job-manager';
 import { getCachedPaths } from '../services/report-paths';
 import { runPipelineForJob } from '../services/pipeline-service';
 
+/** Find a running job matching the same match + market. */
+function findRunningJob(homeTeam: string, awayTeam: string, date: string, market: string) {
+  return jobManager.getAll().find(
+    (j) =>
+      j.homeTeam === homeTeam &&
+      j.awayTeam === awayTeam &&
+      j.date === date &&
+      j.market === market &&
+      !['complete', 'failed'].includes(j.status)
+  );
+}
+
 export async function analysisRoutes(app: FastifyInstance): Promise<void> {
   /** Launch a new analysis job */
   app.post('/api/analysis', async (request, reply) => {
@@ -52,15 +64,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
             return { error: 'Read-only access. Only admin can run analyses.' };
           }
 
-          // Check for duplicate running job
-          const existing = jobManager.getAll().find(
-            (j) =>
-              j.homeTeam === homeTeam &&
-              j.awayTeam === awayTeam &&
-              j.date === date &&
-              j.market === market &&
-              !['complete', 'failed'].includes(j.status)
-          );
+          const existing = findRunningJob(homeTeam, awayTeam, date, market);
           if (existing) {
             return { jobId: existing.id, status: existing.status, duplicate: true };
           }
@@ -96,15 +100,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Read-only access. Only admin can run analyses.' };
     }
 
-    // Check for duplicate: same teams + date + market, still running
-    const existing = jobManager.getAll().find(
-      (j) =>
-        j.homeTeam === homeTeam &&
-        j.awayTeam === awayTeam &&
-        j.date === date &&
-        j.market === market &&
-        !['complete', 'failed'].includes(j.status)
-    );
+    const existing = findRunningJob(homeTeam, awayTeam, date, market);
     if (existing) {
       return { jobId: existing.id, status: existing.status, duplicate: true };
     }
@@ -112,10 +108,8 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     const analyze = body.analyze !== false;
     const job = jobManager.create(homeTeam, awayTeam, date, market);
 
-    // Start pipeline in background (don't await)
-    runPipelineForJob(job, analyze).catch(() => {
-      // Error is already tracked in the job
-    });
+    // Start pipeline in background (don't await — errors tracked in the job)
+    runPipelineForJob(job, analyze).catch(() => {});
 
     return { jobId: job.id, status: job.status };
   });

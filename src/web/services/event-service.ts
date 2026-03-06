@@ -13,9 +13,11 @@ export interface LeagueInfo {
 
 export const SUPPORTED_LEAGUES: LeagueInfo[] = [
   { key: 'soccer_epl', label: 'Premier League' },
+  { key: 'soccer_fa_cup', label: 'FA Cup' },
   { key: 'soccer_uefa_champs_league', label: 'Champions League' },
   { key: 'soccer_germany_bundesliga', label: 'Bundesliga' },
   { key: 'soccer_spain_la_liga', label: 'La Liga' },
+  { key: 'soccer_france_ligue_one', label: 'Ligue 1' },
 ];
 
 export interface EventWithLeague extends OddsEvent {

@@ -22,6 +22,7 @@ import { TavilySearch } from '@langchain/tavily';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
 import { stripCodeFences } from './strip-code-fences';
+import { extractTextContent } from './extract-content';
 import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './prompts/report-analysis-system-prompt';
 import { getCachedResponse, setCachedResponse } from '../cache';
 
@@ -81,23 +82,9 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
     timeoutSec,
   );
 
-  let result: string | undefined;
-
-  if (typeof content === 'string' && content.trim()) {
-    result = stripCodeFences(content.trim());
-  } else if (Array.isArray(content)) {
-    const text = content
-      .filter(
-        (b): b is { type: string; text: string } =>
-          typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text'
-      )
-      .map(b => b.text)
-      .join('\n')
-      .trim();
-    if (text) result = stripCodeFences(text);
-  }
-
-  if (!result) throw new Error('Analysis returned no text content.');
+  const text = extractTextContent(content);
+  if (!text) throw new Error('Analysis returned no text content.');
+  const result = stripCodeFences(text);
 
   // Cache the response
   setCachedResponse(model, prompt, report, result);
@@ -138,24 +125,22 @@ async function withTimeoutAndProgress<T>(
   timeoutSec: number,
 ): Promise<T> {
   const startMs = Date.now();
-  let settled = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const progress = setInterval(() => {
     const elapsed = Math.round((Date.now() - startMs) / 1000);
     const remaining = timeoutSec - elapsed;
     if (remaining > 0) {
-      console.error(`  ⏳ Analysis in progress... ${elapsed}s elapsed (timeout in ${remaining}s)`);
+      console.error(`  Analysis in progress... ${elapsed}s elapsed (timeout in ${remaining}s)`);
     }
   }, PROGRESS_INTERVAL_SEC * 1000);
 
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      if (!settled) {
-        reject(new Error(
-          `Analysis timed out after ${timeoutSec}s. ` +
-          `Increase ANALYSIS_TIMEOUT in .env (current: ${timeoutSec}s) or check your network/proxy.`
-        ));
-      }
+    timeoutId = setTimeout(() => {
+      reject(new Error(
+        `Analysis timed out after ${timeoutSec}s. ` +
+        `Increase ANALYSIS_TIMEOUT in .env (current: ${timeoutSec}s) or check your network/proxy.`
+      ));
     }, timeoutSec * 1000);
   });
 
@@ -163,8 +148,8 @@ async function withTimeoutAndProgress<T>(
     const result = await Promise.race([fn(), timeout]);
     return result;
   } finally {
-    settled = true;
     clearInterval(progress);
+    if (timeoutId) clearTimeout(timeoutId);
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
     console.error(`  Analysis completed in ${elapsed}s`);
   }

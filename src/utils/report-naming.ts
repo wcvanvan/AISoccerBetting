@@ -19,3 +19,13 @@ export function buildMatchDir(teamA: string, teamB: string, date: string): strin
 export function buildReportFilename(teamA: string, teamB: string, date: string, market: string): string {
   return path.join(buildMatchDir(teamA, teamB, date), `${market}.md`);
 }
+
+/** Analysis path: {matchDir}/{market}-analysis.md */
+export function buildAnalysisFilename(teamA: string, teamB: string, date: string, market: string): string {
+  return path.join(buildMatchDir(teamA, teamB, date), `${market}-analysis.md`);
+}
+
+/** News path: {matchDir}/news.md */
+export function buildNewsFilename(teamA: string, teamB: string, date: string): string {
+  return path.join(buildMatchDir(teamA, teamB, date), 'news.md');
+}

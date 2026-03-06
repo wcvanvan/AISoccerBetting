@@ -4,11 +4,8 @@
  * CLI entry point for the web server.
  */
 
-import * as path from 'path';
-import { config as loadEnv } from 'dotenv';
-
-loadEnv({ path: path.join(process.cwd(), '.env.defaults'), quiet: true });
-loadEnv({ path: path.join(process.cwd(), '.env'), override: true, quiet: true });
+import { bootstrapEnv } from './cli-bootstrap';
+bootstrapEnv();
 
 import { createServer } from './web/server';
 

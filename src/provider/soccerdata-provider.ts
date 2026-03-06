@@ -435,24 +435,26 @@ function toStringArray(val: unknown): string[] {
   return Array.isArray(val) ? val.map(String) : [];
 }
 
-function toSubbedOffArray(val: unknown): SubbedOffPlayer[] {
+/** Generic converter: filter array for objects, then map each to T. */
+function toTypedArray<T>(val: unknown, mapper: (obj: Record<string, unknown>) => T): T[] {
   if (!Array.isArray(val)) return [];
   return val
     .filter((v): v is Record<string, unknown> => v != null && typeof v === 'object')
-    .map(v => ({
-      name: String(v.name ?? ''),
-      subbed_off_time: String(v.subbed_off_time ?? ''),
-    }));
+    .map(mapper);
+}
+
+function toSubbedOffArray(val: unknown): SubbedOffPlayer[] {
+  return toTypedArray(val, v => ({
+    name: String(v.name ?? ''),
+    subbed_off_time: String(v.subbed_off_time ?? ''),
+  }));
 }
 
 function toSubstituteArray(val: unknown): Substitute[] {
-  if (!Array.isArray(val)) return [];
-  return val
-    .filter((v): v is Record<string, unknown> => v != null && typeof v === 'object')
-    .map(v => ({
-      name: String(v.name ?? ''),
-      entry_time: v.entry_time != null ? String(v.entry_time) : null,
-    }));
+  return toTypedArray(val, v => ({
+    name: String(v.name ?? ''),
+    entry_time: v.entry_time != null ? String(v.entry_time) : null,
+  }));
 }
 
 function toNullableNumber(val: unknown): number | null {
@@ -477,24 +479,18 @@ function toMatchStats(val: unknown): MatchStats | null {
 }
 
 function toGoalEvents(val: unknown): GoalEvent[] {
-  if (!Array.isArray(val)) return [];
-  return val
-    .filter((v): v is Record<string, unknown> => v != null && typeof v === 'object')
-    .map(v => ({
-      player: String(v.player ?? ''),
-      minute: String(v.minute ?? ''),
-    }));
+  return toTypedArray(val, v => ({
+    player: String(v.player ?? ''),
+    minute: String(v.minute ?? ''),
+  }));
 }
 
 function toCardEvents(val: unknown): CardEvent[] {
-  if (!Array.isArray(val)) return [];
-  return val
-    .filter((v): v is Record<string, unknown> => v != null && typeof v === 'object')
-    .map(v => ({
-      player: String(v.player ?? ''),
-      minute: String(v.minute ?? ''),
-      card_type: (['yellow', 'red', 'second_yellow'].includes(String(v.card_type))
-        ? String(v.card_type) as 'yellow' | 'red' | 'second_yellow'
-        : 'yellow'),
-    }));
+  return toTypedArray(val, v => ({
+    player: String(v.player ?? ''),
+    minute: String(v.minute ?? ''),
+    card_type: (['yellow', 'red', 'second_yellow'].includes(String(v.card_type))
+      ? String(v.card_type) as 'yellow' | 'red' | 'second_yellow'
+      : 'yellow'),
+  }));
 }

@@ -4,12 +4,8 @@
  * CLI entry point for corner-kick betting analysis pipeline.
  */
 
-import * as path from 'path';
-import { config as loadEnv } from 'dotenv';
-
-// Load shared defaults first, then local secrets (local wins on conflicts)
-loadEnv({ path: path.join(process.cwd(), '.env.defaults'), quiet: true });
-loadEnv({ path: path.join(process.cwd(), '.env'), override: true, quiet: true });
+import { bootstrapEnv } from './cli-bootstrap';
+bootstrapEnv();
 
 import { runPipeline } from './cli-shared';
 import { CORNER_MARKET_CONFIG } from './odds';

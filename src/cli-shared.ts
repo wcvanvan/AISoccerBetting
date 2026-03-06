@@ -30,6 +30,10 @@ export interface PipelineConfig {
   marketLabel: string;
 }
 
+function errorMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // ── Argument types ──────────────────────────────────────────────────────────
 
 type CollectArgs = {
@@ -171,17 +175,10 @@ Prerequisites:
 export { slug, buildMatchDir, buildReportFilename } from './utils/report-naming';
 
 import {
-  buildMatchDir as _buildMatchDir,
   buildReportFilename as _buildReportFilename,
+  buildAnalysisFilename as _buildAnalysisFilename,
+  buildNewsFilename as _buildNewsFilename,
 } from './utils/report-naming';
-
-function buildAnalysisFilename(reportFilename: string): string {
-  return reportFilename.replace(/\.md$/, '-analysis.md');
-}
-
-function buildNewsFilename(teamA: string, teamB: string, date: string): string {
-  return path.join(_buildMatchDir(teamA, teamB, date), 'news.md');
-}
 
 // ── Analysis runner ─────────────────────────────────────────────────────────
 
@@ -240,14 +237,14 @@ async function listOddsEvents(apiKey: string): Promise<void> {
   const rawKeys = process.env.ODDS_SPORT_KEYS?.trim();
   const sportKeys = rawKeys
     ? rawKeys.split(',').map(s => s.trim()).filter(Boolean)
-    : ['soccer_epl', 'soccer_uefa_champs_league'];
+    : ['soccer_epl', 'soccer_fa_cup', 'soccer_uefa_champs_league', 'soccer_france_ligue_one'];
 
   const client = new OddsApiClient(apiKey);
 
   for (const sportKey of sportKeys) {
     let events;
     try { events = await client.getEvents(sportKey); }
-    catch (err) { console.warn(`[skip] ${sportKey}: ${err instanceof Error ? err.message : err}`); continue; }
+    catch (err) { console.warn(`[skip] ${sportKey}: ${errorMsg(err)}`); continue; }
     if (events.length === 0) continue;
 
     console.log(`\n${sportKey}:`);
@@ -281,7 +278,7 @@ async function testConnection(): Promise<void> {
     process.exit(0);
   } catch (err) {
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMsg(err);
     console.error(`FAILED after ${elapsed}s: ${msg}`);
     process.exit(1);
   }
@@ -313,12 +310,12 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       process.exit(1);
     }
     const reportMarkdown = fs.readFileSync(reportPath, 'utf8');
-    const analysisFilename = buildAnalysisFilename(reportPath);
+    const analysisFilename = reportPath.replace(/\.md$/, '-analysis.md');
     try {
       await runAnalysis(reportMarkdown, analysisFilename, analysisPrompt, marketLabel);
       process.exit(0);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMsg(err);
       console.error(`Analysis failed: ${msg}`);
       process.exit(1);
     }
@@ -326,7 +323,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
   // ── Standalone match news mode ──
   if (args.mode === 'news') {
-    const newsFilename = buildNewsFilename(args.teamA, args.teamB, args.date);
+    const newsFilename = _buildNewsFilename(args.teamA, args.teamB, args.date);
     const newsDir = path.dirname(newsFilename);
     if (!fs.existsSync(newsDir)) fs.mkdirSync(newsDir, { recursive: true });
     try {
@@ -336,7 +333,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       console.log(`Match news saved → ${newsFilename}`);
       process.exit(0);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMsg(err);
       console.error(`Match news failed: ${msg}`);
       process.exit(1);
     }
@@ -357,7 +354,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       }
       process.exit(0);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMsg(err);
       console.error(`Odds lookup failed: ${msg}`);
       process.exit(1);
     }
@@ -381,7 +378,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       try {
         matchNewsSummary = await runMatchNews(args.teamA, args.teamB, args.date);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMsg(err);
         console.error(`Match news skipped: ${msg}`);
       }
     }
@@ -403,10 +400,10 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       process.env.ANALYSIS_ENABLED === 'true' || process.env.ANALYSIS_ENABLED === '1';
     if (useAnalysis) {
       try {
-        const analysisFilename = buildAnalysisFilename(reportFilename);
+        const analysisFilename = _buildAnalysisFilename(args.teamA, args.teamB, args.date, toolName);
         await runAnalysis(markdown, analysisFilename, analysisPrompt, marketLabel);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMsg(err);
         console.error(`Analysis skipped: ${msg}`);
       }
     }

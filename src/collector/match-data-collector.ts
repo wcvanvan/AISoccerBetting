@@ -29,6 +29,10 @@ export interface MatchDataCollectorInput {
  * a MarketConfig to determine which odds markets to fetch,
  * and FormatOptions to control report formatting.
  */
+function errorMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export class MatchDataCollector {
   private provider: DataProvider;
   private markdownFormatter: MarkdownFormatter;
@@ -133,7 +137,6 @@ export class MatchDataCollector {
           ? this.oddsCollector.collectOdds(
               normalizedInput.teamA_name,
               normalizedInput.teamB_name,
-              normalizedInput.match_date
             )
           : Promise.resolve(undefined),
         canFetchSeasonStats
@@ -155,7 +158,7 @@ export class MatchDataCollector {
 
       return format(teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = errorMsg(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);
       return format([], [], []);
     }
@@ -172,7 +175,7 @@ export class MatchDataCollector {
       }
       return teamId;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = errorMsg(error);
       throw new Error(`Failed to resolve ${label}: ${errorMessage}`);
     }
   }
@@ -190,7 +193,7 @@ export class MatchDataCollector {
 
       return matches;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = errorMsg(error);
       this.alerts.push(`${teamName}: Failed to collect matches: ${errorMessage}`);
       return [];
     }
@@ -219,7 +222,7 @@ export class MatchDataCollector {
 
       return h2h_matches;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = errorMsg(error);
       this.alerts.push(`Failed to collect H2H matches: ${errorMessage}`);
       return [];
     }

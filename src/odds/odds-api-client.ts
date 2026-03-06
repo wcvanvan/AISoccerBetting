@@ -8,6 +8,7 @@
 import { OddsEvent, OddsEventOddsResponse } from './types';
 
 const BASE_URL = 'https://api.the-odds-api.com/v4';
+const FETCH_TIMEOUT_MS = 15_000;
 
 export class OddsApiClient {
   private apiKey: string;
@@ -44,7 +45,7 @@ export class OddsApiClient {
       url.searchParams.set(k, v);
     }
 
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 
     // Log remaining API quota
     const remaining = res.headers.get('x-requests-remaining');

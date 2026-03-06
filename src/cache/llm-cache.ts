@@ -23,7 +23,7 @@ function ensureCacheDir(): void {
 
 function computeHash(model: string, systemPrompt: string, userMessage: string): string {
   const payload = JSON.stringify({ model, systemPrompt, userMessage });
-  return crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
+  return crypto.createHash('sha256').update(payload).digest('hex').slice(0, 32);
 }
 
 function cachePath(hash: string): string {
@@ -74,10 +74,14 @@ export function setCachedResponse(
     createdAt: new Date().toISOString(),
   };
 
+  const finalPath = cachePath(hash);
+  const tempPath = `${finalPath}.tmp`;
   try {
-    fs.writeFileSync(cachePath(hash), JSON.stringify(entry, null, 2), 'utf8');
+    fs.writeFileSync(tempPath, JSON.stringify(entry, null, 2), 'utf8');
+    fs.renameSync(tempPath, finalPath);
     console.error(`  [cache write] ${hash}`);
   } catch (err) {
+    try { fs.unlinkSync(tempPath); } catch {}
     console.error(`  [cache write failed] ${err instanceof Error ? err.message : err}`);
   }
 }

@@ -17,6 +17,7 @@ import { TavilySearch } from '@langchain/tavily';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
 import { stripCodeFences } from './strip-code-fences';
+import { extractTextContent } from './extract-content';
 import { MATCH_NEWS_SYSTEM_PROMPT } from './prompts/match-news-system-prompt';
 
 function buildUserMessage(teamA: string, teamB: string, matchDate: string): string {
@@ -62,18 +63,8 @@ export async function runMatchNews(
   const last = messages[messages.length - 1];
   const content = last?.content;
 
-  if (typeof content === 'string' && content.trim()) {
-    return stripCodeFences(content.trim());
-  }
-  if (Array.isArray(content)) {
-    const text = content
-      .filter((b): b is { type: string; text: string } => typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text')
-      .map((b) => b.text)
-      .join('\n')
-      .trim();
-    if (text) return stripCodeFences(text);
-  }
-
-  throw new Error('Agent returned no text content.');
+  const text = extractTextContent(content);
+  if (!text) throw new Error('Agent returned no text content.');
+  return stripCodeFences(text);
 }
 

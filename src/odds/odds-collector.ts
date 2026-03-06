@@ -12,19 +12,15 @@ import { OddsApiClient } from './odds-api-client';
 import { OddsEvent, MatchOdds, MarketGroup, BookmakerOdds } from './types';
 import { MarketConfig, CORNER_MARKET_CONFIG } from './market-config';
 
-const DEFAULT_SPORT_KEYS = ['soccer_epl', 'soccer_uefa_champs_league'];
+const DEFAULT_SPORT_KEYS = ['soccer_epl', 'soccer_fa_cup', 'soccer_uefa_champs_league', 'soccer_france_ligue_one'];
+
+function resolveEnv(key: string, fallback?: string): string | undefined {
+  return process.env[key]?.trim() || fallback;
+}
 
 function resolveSportKeys(): string[] {
-  const env = process.env.ODDS_SPORT_KEYS?.trim();
+  const env = resolveEnv('ODDS_SPORT_KEYS');
   return env ? env.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_SPORT_KEYS;
-}
-
-function resolveBookmakers(): string | undefined {
-  return process.env.ODDS_BOOKMAKERS?.trim() || undefined;
-}
-
-function resolveRegions(): string {
-  return process.env.ODDS_REGIONS?.trim() || 'eu,us';
 }
 
 export class OddsCollector {
@@ -43,7 +39,6 @@ export class OddsCollector {
   async collectOdds(
     teamA: string,
     teamB: string,
-    _matchDate?: string
   ): Promise<MatchOdds> {
     try {
       const result = await this.findEvent(teamA, teamB);
@@ -85,8 +80,8 @@ export class OddsCollector {
    * Fetch odds using the configured market keys.
    */
   private async fetchFilteredOdds(sportKey: string, eventId: string): Promise<MarketGroup[]> {
-    const bookmakers = resolveBookmakers();
-    const regions    = resolveRegions();
+    const bookmakers = resolveEnv('ODDS_BOOKMAKERS');
+    const regions    = resolveEnv('ODDS_REGIONS', 'eu,us')!;
     const opts       = bookmakers ? { bookmakers } : { regions };
 
     const oddsResp = await this.client.getEventOdds(

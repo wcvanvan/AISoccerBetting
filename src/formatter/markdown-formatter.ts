@@ -30,6 +30,42 @@ const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   oddsLabel: 'Corner',
 };
 
+// ── Shared stat helpers ────────────────────────────────────────────────────
+
+function countYellowCards(events?: CardEvent[]): number {
+  return (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
+}
+
+function countRedCards(events?: CardEvent[]): number {
+  return (events ?? []).filter(c => c.card_type === 'red' || c.card_type === 'second_yellow').length;
+}
+
+function avg(arr: number[]): string {
+  return (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
+}
+
+function pct(arr: number[], cond: (v: number) => boolean): string {
+  return ((arr.filter(cond).length / arr.length) * 100).toFixed(1);
+}
+
+const TIMING_BINS = [
+  { label: '1-15', min: 1, max: 15 },
+  { label: '16-30', min: 16, max: 30 },
+  { label: '31-HT', min: 31, max: 45 },
+  { label: '46-60', min: 46, max: 60 },
+  { label: '61-75', min: 61, max: 75 },
+  { label: '76-FT', min: 76, max: Infinity },
+] as const;
+
+function binMinutes(minutes: number[]): string {
+  const total = minutes.length;
+  if (total === 0) return 'none';
+  return TIMING_BINS.map(b => {
+    const count = minutes.filter(m => m >= b.min && m <= b.max).length;
+    return `${b.label}: ${count} (${((count / total) * 100).toFixed(0)}%)`;
+  }).join(', ');
+}
+
 export class MarkdownFormatter {
   format_output(
     teamA_name: string,
@@ -298,24 +334,18 @@ export class MarkdownFormatter {
   ): string {
     const parts: string[] = [];
 
-    // Prefer event counts when boxscore stats are 0 but events exist
-    const countYellow = (events?: CardEvent[]) =>
-      (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
-    const countRed = (events?: CardEvent[]) =>
-      (events ?? []).filter(c => c.card_type === 'red' || c.card_type === 'second_yellow').length;
-
     let yc = stats?.yellow_cards ?? 0;
     let ycO = oppStats?.yellow_cards ?? 0;
-    if (yc === 0 && countYellow(teamCards) > 0) yc = countYellow(teamCards);
-    if (ycO === 0 && countYellow(oppCards) > 0) ycO = countYellow(oppCards);
+    if (yc === 0 && countYellowCards(teamCards) > 0) yc = countYellowCards(teamCards);
+    if (ycO === 0 && countYellowCards(oppCards) > 0) ycO = countYellowCards(oppCards);
     if (yc > 0 || ycO > 0) {
       parts.push(`YC ${yc}-${ycO}`);
     }
 
     let rc = stats?.red_cards ?? 0;
     let rcO = oppStats?.red_cards ?? 0;
-    if (rc === 0 && countRed(teamCards) > 0) rc = countRed(teamCards);
-    if (rcO === 0 && countRed(oppCards) > 0) rcO = countRed(oppCards);
+    if (rc === 0 && countRedCards(teamCards) > 0) rc = countRedCards(teamCards);
+    if (rcO === 0 && countRedCards(oppCards) > 0) rcO = countRedCards(oppCards);
     if (rc > 0 || rcO > 0) {
       parts.push(`RC ${rc}-${rcO}`);
     }
@@ -433,10 +463,6 @@ export class MarkdownFormatter {
       const conceded = validScores.map(s => s[1]);
       const totals = validScores.map(s => s[0] + s[1]);
 
-      const avg = (arr: number[]) => (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
-      const pct = (arr: number[], cond: (v: number) => boolean) =>
-        ((arr.filter(cond).length / arr.length) * 100).toFixed(1);
-
       lines.push(`${label} (n=${n}):`);
       lines.push(`- Scored: avg ${avg(scored)} · Conceded: avg ${avg(conceded)} · Total: avg ${avg(totals)}`);
       const bttsPct = ((validScores.filter(s => s[0] > 0 && s[1] > 0).length / n) * 100).toFixed(1);
@@ -484,26 +510,12 @@ export class MarkdownFormatter {
     }
 
     if (allGoalMinutes.length > 0 || allConcededMinutes.length > 0) {
-      const bin = (minutes: number[]) => {
-        const total = minutes.length;
-        if (total === 0) return 'none';
-        const bins = [
-          { label: '1-15', count: minutes.filter(m => m >= 1 && m <= 15).length },
-          { label: '16-30', count: minutes.filter(m => m >= 16 && m <= 30).length },
-          { label: '31-HT', count: minutes.filter(m => m >= 31 && m <= 45).length },
-          { label: '46-60', count: minutes.filter(m => m >= 46 && m <= 60).length },
-          { label: '61-75', count: minutes.filter(m => m >= 61 && m <= 75).length },
-          { label: '76-FT', count: minutes.filter(m => m >= 76).length },
-        ];
-        return bins.map(b => `${b.label}: ${b.count} (${((b.count / total) * 100).toFixed(0)}%)`).join(', ');
-      };
-
       lines.push('Goal timing (all games):');
       if (allGoalMinutes.length > 0) {
-        lines.push(`- Scored (${allGoalMinutes.length}): ${bin(allGoalMinutes)}`);
+        lines.push(`- Scored (${allGoalMinutes.length}): ${binMinutes(allGoalMinutes)}`);
       }
       if (allConcededMinutes.length > 0) {
-        lines.push(`- Conceded (${allConcededMinutes.length}): ${bin(allConcededMinutes)}`);
+        lines.push(`- Conceded (${allConcededMinutes.length}): ${binMinutes(allConcededMinutes)}`);
       }
     }
 
@@ -525,30 +537,25 @@ export class MarkdownFormatter {
     const all = matches;
     const venue = matches.filter(m => m.venue === venueFilter);
 
-    const countYellow = (events?: CardEvent[]) =>
-      (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
-    const countRed = (events?: CardEvent[]) =>
-      (events ?? []).filter(c => c.card_type === 'red' || c.card_type === 'second_yellow').length;
-
     const computeStats = (ms: MatchDetails[], label: string) => {
       const n = ms.length;
       if (n === 0) return;
 
       const teamYC = ms.map(m => {
         const boxYC = m.stats?.yellow_cards ?? 0;
-        return boxYC > 0 ? boxYC : countYellow(m.card_events);
+        return boxYC > 0 ? boxYC : countYellowCards(m.card_events);
       });
       const oppYC = ms.map(m => {
         const boxYC = m.opponent_stats?.yellow_cards ?? 0;
-        return boxYC > 0 ? boxYC : countYellow(m.opponent_card_events);
+        return boxYC > 0 ? boxYC : countYellowCards(m.opponent_card_events);
       });
       const teamRC = ms.map(m => {
         const boxRC = m.stats?.red_cards ?? 0;
-        return boxRC > 0 ? boxRC : countRed(m.card_events);
+        return boxRC > 0 ? boxRC : countRedCards(m.card_events);
       });
       const oppRC = ms.map(m => {
         const boxRC = m.opponent_stats?.red_cards ?? 0;
-        return boxRC > 0 ? boxRC : countRed(m.opponent_card_events);
+        return boxRC > 0 ? boxRC : countRedCards(m.opponent_card_events);
       });
       const teamCards = teamYC.map((yc, i) => yc + teamRC[i]);
       const oppCards = oppYC.map((yc, i) => yc + oppRC[i]);
@@ -556,10 +563,6 @@ export class MarkdownFormatter {
       const teamFouls = ms.map(m => m.stats?.fouls ?? 0);
       const oppFouls = ms.map(m => m.opponent_stats?.fouls ?? 0);
       const totalFouls = teamFouls.map((f, i) => f + oppFouls[i]);
-
-      const avg = (arr: number[]) => (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
-      const pct = (arr: number[], cond: (v: number) => boolean) =>
-        ((arr.filter(cond).length / arr.length) * 100).toFixed(1);
 
       lines.push(`${label} (n=${n}):`);
       lines.push(`- Team cards: avg ${avg(teamCards)} (YC ${avg(teamYC)}, RC ${avg(teamRC)})`);
@@ -627,26 +630,12 @@ export class MarkdownFormatter {
     }
 
     if (allCardMinutes.length > 0 || allOppCardMinutes.length > 0) {
-      const bin = (minutes: number[]) => {
-        const total = minutes.length;
-        if (total === 0) return 'none';
-        const bins = [
-          { label: '1-15', count: minutes.filter(m => m >= 1 && m <= 15).length },
-          { label: '16-30', count: minutes.filter(m => m >= 16 && m <= 30).length },
-          { label: '31-HT', count: minutes.filter(m => m >= 31 && m <= 45).length },
-          { label: '46-60', count: minutes.filter(m => m >= 46 && m <= 60).length },
-          { label: '61-75', count: minutes.filter(m => m >= 61 && m <= 75).length },
-          { label: '76-FT', count: minutes.filter(m => m >= 76).length },
-        ];
-        return bins.map(b => `${b.label}: ${b.count} (${((b.count / total) * 100).toFixed(0)}%)`).join(', ');
-      };
-
       lines.push('Card timing (all games):');
       if (allCardMinutes.length > 0) {
-        lines.push(`- Team (${allCardMinutes.length}): ${bin(allCardMinutes)}`);
+        lines.push(`- Team (${allCardMinutes.length}): ${binMinutes(allCardMinutes)}`);
       }
       if (allOppCardMinutes.length > 0) {
-        lines.push(`- Opponent (${allOppCardMinutes.length}): ${bin(allOppCardMinutes)}`);
+        lines.push(`- Opponent (${allOppCardMinutes.length}): ${binMinutes(allOppCardMinutes)}`);
       }
 
       // 1H vs 2H split
@@ -840,13 +829,10 @@ export class MarkdownFormatter {
   private formatH2HCardStats(m: H2HMatch, teamA: string, teamB: string): string {
     const parts: string[] = [];
 
-    const countYellow = (events?: CardEvent[]) =>
-      (events ?? []).filter(c => c.card_type === 'yellow' || c.card_type === 'second_yellow').length;
-
     let ycA = m.teamA_stats?.yellow_cards ?? 0;
     let ycB = m.teamB_stats?.yellow_cards ?? 0;
-    if (ycA === 0 && countYellow(m.teamA_card_events) > 0) ycA = countYellow(m.teamA_card_events);
-    if (ycB === 0 && countYellow(m.teamB_card_events) > 0) ycB = countYellow(m.teamB_card_events);
+    if (ycA === 0 && countYellowCards(m.teamA_card_events) > 0) ycA = countYellowCards(m.teamA_card_events);
+    if (ycB === 0 && countYellowCards(m.teamB_card_events) > 0) ycB = countYellowCards(m.teamB_card_events);
     if (ycA > 0 || ycB > 0) {
       parts.push(`YC ${teamA} ${ycA}, ${teamB} ${ycB}`);
     }
@@ -929,7 +915,7 @@ export class MarkdownFormatter {
     }
 
     for (const market of odds.markets) {
-      const title = market.key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const title = this.readableKey(market.key);
       lines.push(`### ${title}\n`);
 
       const allNames = market.bookmakers.flatMap(bm => bm.outcomes.map(o => o.name));
