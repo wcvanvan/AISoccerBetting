@@ -7,7 +7,7 @@ import * as path from 'path';
 import { FastifyInstance } from 'fastify';
 import { Marked } from 'marked';
 import { jobManager } from '../services/job-manager';
-import { getCachedPaths, REPORTS_DIR } from '../services/pipeline-service';
+import { getCachedPaths, REPORTS_DIR } from '../services/report-paths';
 import { MarketType } from '../services/job-manager';
 
 /** Marked instance configured to strip raw HTML (XSS prevention) */
@@ -176,6 +176,167 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
     }
     return { html };
   });
+
+  /** Check cache status for all markets of a given match */
+  app.get('/api/cache-status', async (request) => {
+    const query = request.query as { homeTeam?: string; awayTeam?: string; date?: string };
+    const homeTeam = query.homeTeam?.trim();
+    const awayTeam = query.awayTeam?.trim();
+    const date = query.date?.trim();
+
+    if (!homeTeam || !awayTeam || !date) {
+      return { markets: {} };
+    }
+
+    const markets: Record<string, { hasReport: boolean; hasAnalysis: boolean }> = {};
+    for (const m of ['goals', 'corners', 'cards'] as MarketType[]) {
+      const cached = getCachedPaths(homeTeam, awayTeam, date, m);
+      markets[m] = {
+        hasReport: !!cached.reportPath,
+        hasAnalysis: !!cached.analysisPath,
+      };
+    }
+    return { markets };
+  });
+
+  /**
+   * History endpoint — scans data/reports/ directory to discover all matches
+   * (both web- and CLI-generated). Supports both directory layout
+   * ({matchDir}/{market}.md) and legacy flat layout ({matchDir}-{market}.md).
+   */
+  app.get('/api/history', async () => {
+    if (!fs.existsSync(REPORTS_DIR)) return { matches: [] };
+
+    const matchMap = new Map<
+      string,
+      {
+        date: string;
+        homeTeam: string;
+        awayTeam: string;
+        markets: Record<string, { hasReport: boolean; hasAnalysis: boolean }>;
+        mtime: number;
+      }
+    >();
+
+    const filePattern = /^(goals|corners|cards)(-analysis)?\.md$/;
+    const dirPattern = /^(.+)-vs-(.+)-(\d{4}-\d{2}-\d{2})$/;
+    const flatPattern =
+      /^(.+)-vs-(.+)-(\d{4}-\d{2}-\d{2})-(goals|corners|cards)(-analysis)?\.md$/;
+
+    const entries = fs.readdirSync(REPORTS_DIR, { withFileTypes: true });
+
+    // Scan subdirectories (new layout)
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const dm = entry.name.match(dirPattern);
+      if (!dm) continue;
+
+      const [, homeSlug, awaySlug, date] = dm;
+      const matchKey = entry.name;
+      const dirPath = path.join(REPORTS_DIR, entry.name);
+      const files = fs.readdirSync(dirPath).filter((f) => f.endsWith('.md'));
+
+      if (files.length === 0) continue;
+
+      let homeTeam = unslug(homeSlug);
+      let awayTeam = unslug(awaySlug);
+      const firstReport = files.find((f) => filePattern.test(f) && !f.includes('-analysis'));
+      if (firstReport) {
+        const parsed = parseTitle(readFirstLine(path.join(dirPath, firstReport)));
+        if (parsed) { homeTeam = parsed.home; awayTeam = parsed.away; }
+      }
+
+      const match = { date, homeTeam, awayTeam, markets: {} as Record<string, { hasReport: boolean; hasAnalysis: boolean }>, mtime: 0 };
+
+      for (const file of files) {
+        const fm = file.match(filePattern);
+        if (!fm) continue;
+        const [, market, isAnalysis] = fm;
+        if (!match.markets[market]) match.markets[market] = { hasReport: false, hasAnalysis: false };
+        if (isAnalysis) match.markets[market].hasAnalysis = true;
+        else match.markets[market].hasReport = true;
+
+        const stat = fs.statSync(path.join(dirPath, file));
+        if (stat.mtimeMs > match.mtime) match.mtime = stat.mtimeMs;
+      }
+
+      matchMap.set(matchKey, match);
+    }
+
+    // Scan flat files (legacy layout)
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      const fm = entry.name.match(flatPattern);
+      if (!fm) continue;
+
+      const [, homeSlug, awaySlug, date, market, isAnalysis] = fm;
+      const matchKey = `${homeSlug}-vs-${awaySlug}-${date}`;
+
+      if (matchMap.has(matchKey)) {
+        const existing = matchMap.get(matchKey)!;
+        if (!existing.markets[market]) existing.markets[market] = { hasReport: false, hasAnalysis: false };
+        if (isAnalysis) existing.markets[market].hasAnalysis = true;
+        else existing.markets[market].hasReport = true;
+        const stat = fs.statSync(path.join(REPORTS_DIR, entry.name));
+        if (stat.mtimeMs > existing.mtime) existing.mtime = stat.mtimeMs;
+        continue;
+      }
+
+      let homeTeam = unslug(homeSlug);
+      let awayTeam = unslug(awaySlug);
+      if (!isAnalysis) {
+        const parsed = parseTitle(readFirstLine(path.join(REPORTS_DIR, entry.name)));
+        if (parsed) { homeTeam = parsed.home; awayTeam = parsed.away; }
+      }
+
+      const match = matchMap.get(matchKey) || {
+        date, homeTeam, awayTeam,
+        markets: {} as Record<string, { hasReport: boolean; hasAnalysis: boolean }>,
+        mtime: 0,
+      };
+      if (!match.markets[market]) match.markets[market] = { hasReport: false, hasAnalysis: false };
+      if (isAnalysis) match.markets[market].hasAnalysis = true;
+      else match.markets[market].hasReport = true;
+
+      const stat = fs.statSync(path.join(REPORTS_DIR, entry.name));
+      if (stat.mtimeMs > match.mtime) match.mtime = stat.mtimeMs;
+
+      matchMap.set(matchKey, match);
+    }
+
+    const matches = Array.from(matchMap.values())
+      .sort((a, b) => b.mtime - a.mtime)
+      .map(({ homeTeam, awayTeam, date, markets, mtime }) => ({
+        homeTeam, awayTeam, date, markets, lastModified: mtime,
+      }));
+
+    return { matches };
+  });
+}
+
+/** Convert slug back to title case: "tottenham-hotspur" → "Tottenham Hotspur" */
+function unslug(s: string): string {
+  return s
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** Read the first non-empty line of a file */
+function readFirstLine(filePath: string): string {
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(512);
+  fs.readSync(fd, buf, 0, 512, 0);
+  fs.closeSync(fd);
+  const lines = buf.toString('utf8').split('\n');
+  return lines.find((l) => l.trim().length > 0) || '';
+}
+
+/** Parse "# Team A vs Team B" or "# Team A vs Team B — ..." title line */
+function parseTitle(line: string): { home: string; away: string } | null {
+  const m = line.match(/^#{1,2}\s+(.+?)\s+vs\s+(.+?)(?:\s*[—–\-]\s+.*)?$/i);
+  if (!m) return null;
+  return { home: m[1].trim(), away: m[2].trim() };
 }
 
 /**

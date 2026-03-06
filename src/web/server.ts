@@ -8,8 +8,6 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyCookie from '@fastify/cookie';
 
-import { eventsRoutes } from './routes/events';
-import { analysisRoutes } from './routes/analysis';
 import { reportsRoutes } from './routes/reports';
 import {
   authenticate,
@@ -26,7 +24,14 @@ declare module 'fastify' {
 }
 
 const SESSION_COOKIE = 'session';
-const PUBLIC_PATHS = ['/login.html', '/style.css', '/api/login'];
+const PUBLIC_PATHS = ['/login.html', '/style.css', '/api/login', '/api/config'];
+const READONLY = process.env.READONLY_MODE === '1';
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Rate limiter for login attempts (in-memory, per IP)
+const loginAttempts = new Map<string, { count: number; lastAttempt: number }>();
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW = 60_000; // 60 seconds
 
 /**
  * Resolve the public directory. Works in both ts-node (src/) and compiled (dist/) modes.
@@ -81,6 +86,19 @@ export async function createServer() {
 
   // Login / Logout routes
   app.post('/api/login', async (request, reply) => {
+    // Rate limiting by IP
+    const ip = request.ip;
+    const now = Date.now();
+    const entry = loginAttempts.get(ip);
+    if (entry) {
+      if (now - entry.lastAttempt > RATE_LIMIT_WINDOW) {
+        loginAttempts.delete(ip);
+      } else if (entry.count >= RATE_LIMIT_MAX) {
+        reply.status(429);
+        return { ok: false, error: 'Too many login attempts. Try again later.' };
+      }
+    }
+
     const body = request.body as { username?: string; password?: string };
     const username = body.username?.trim();
     const password = body.password;
@@ -92,15 +110,25 @@ export async function createServer() {
 
     const user = authenticate(username, password);
     if (!user) {
+      // Track failed attempt
+      const current = loginAttempts.get(ip);
+      loginAttempts.set(ip, {
+        count: (current?.count ?? 0) + 1,
+        lastAttempt: now,
+      });
       reply.status(401);
       return { ok: false, error: 'Invalid username or password' };
     }
+
+    // Successful login — reset rate limiter for this IP
+    loginAttempts.delete(ip);
 
     const token = createSession(user);
     reply.setCookie(SESSION_COOKIE, token, {
       path: '/',
       httpOnly: true,
       sameSite: 'lax',
+      secure: IS_PROD,
       maxAge: 7 * 24 * 60 * 60, // 7 days
     });
     return { ok: true, user: { username: user.username, role: user.role } };
@@ -121,16 +149,26 @@ export async function createServer() {
     };
   });
 
-  // API routes
-  await app.register(eventsRoutes);
-  await app.register(analysisRoutes);
+  // Config endpoint — tells the frontend about readonly mode
+  app.get('/api/config', async () => {
+    return { readonly: READONLY };
+  });
+
+  // Readonly mode: only register lightweight report routes (no pipeline/events deps)
+  // Full mode: dynamically import events + analysis to avoid loading heavy deps when not needed
+  if (!READONLY) {
+    const { eventsRoutes } = await import('./routes/events');
+    const { analysisRoutes } = await import('./routes/analysis');
+    await app.register(eventsRoutes);
+    await app.register(analysisRoutes);
+  }
   await app.register(reportsRoutes);
 
   // Health check
   app.get('/api/health', async () => {
     const checks = {
       oddsApiKey: !!process.env.THE_ODDS_API_KEY?.trim(),
-      python: true,
+      readonly: READONLY,
     };
     return { status: 'ok', checks };
   });

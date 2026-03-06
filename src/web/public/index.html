@@ -11,7 +11,7 @@
 <body>
   <header>
     <div class="container">
-      <a href="#" class="logo" onclick="showPage('matches')">Soccer<span>Bet</span></a>
+      <a href="#" class="logo" onclick="showPage(readonlyMode ? 'history' : 'matches')">Soccer<span>Bet</span></a>
       <nav>
         <a href="#" class="active" data-page="matches" onclick="showPage('matches')">Matches</a>
         <a href="#" data-page="history" onclick="showPage('history')">History</a>

@@ -8,7 +8,7 @@ __pycache__/
 *.pyc
 .cache/
 src/cache/data/
-data/reports/
+# data/reports/ — tracked for Vercel deployment (reports served from git)
 # ad-hoc analysis outputs and scratch scripts in project root
 *.md
 !README.md

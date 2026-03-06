@@ -1,6 +1,6 @@
 /**
- * Simple session-based authentication service.
- * Users and passwords are configured via environment variables.
+ * Stateless session auth using HMAC-signed cookies.
+ * Works in serverless (Vercel) — no in-memory session store.
  */
 
 import * as crypto from 'crypto';
@@ -10,6 +10,28 @@ export type UserRole = 'admin' | 'reader';
 export interface SessionUser {
   username: string;
   role: UserRole;
+}
+
+const SESSION_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
+
+/**
+ * Secret for signing session tokens.
+ * Required in production; falls back to a random value in dev (sessions lost on restart).
+ */
+function getSecret(): string {
+  const env = process.env.SESSION_SECRET?.trim();
+  if (env) return env;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET env var is required in production');
+  }
+  // Dev fallback — random per process (sessions cleared on restart)
+  return crypto.randomBytes(32).toString('hex');
+}
+
+let _secret: string | null = null;
+function secret(): string {
+  if (!_secret) _secret = getSecret();
+  return _secret;
 }
 
 /**
@@ -57,8 +79,6 @@ function getUsers() {
   return USERS;
 }
 
-const sessions = new Map<string, SessionUser>();
-
 export function authenticate(
   username: string,
   password: string
@@ -68,16 +88,50 @@ export function authenticate(
   return { username, role: user.role };
 }
 
+/** Create a signed session token: base64url(payload).hmac */
 export function createSession(user: SessionUser): string {
-  const token = crypto.randomUUID();
-  sessions.set(token, user);
-  return token;
+  const payload = JSON.stringify({
+    username: user.username,
+    role: user.role,
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL,
+  });
+  const encoded = Buffer.from(payload).toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', secret())
+    .update(encoded)
+    .digest('base64url');
+  return `${encoded}.${sig}`;
 }
 
+/** Verify a signed token and return the session user, or null if invalid/expired. */
 export function getSession(token: string): SessionUser | null {
-  return sessions.get(token) ?? null;
+  const dot = token.indexOf('.');
+  if (dot < 0) return null;
+
+  const encoded = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+
+  const expected = crypto
+    .createHmac('sha256', secret())
+    .update(encoded)
+    .digest('base64url');
+
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString());
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+    return { username: payload.username, role: payload.role };
+  } catch {
+    return null;
+  }
 }
 
-export function destroySession(token: string): void {
-  sessions.delete(token);
+/** No-op — stateless tokens have no server-side state to clean up. */
+export function destroySession(_token: string): void {
+  // Cookie is cleared by the caller; nothing to do here.
 }

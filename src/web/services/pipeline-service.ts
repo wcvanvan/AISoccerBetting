@@ -17,11 +17,11 @@ import {
   MarketConfig,
 } from '../../odds';
 import { FormatOptions } from '../../formatter';
-import { buildReportFilename, buildMatchDir } from '../../cli-shared';
+import { buildReportFilename } from '../../cli-shared';
 import { jobManager, Job, MarketType } from './job-manager';
+import { REPORTS_DIR } from './report-paths';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-export const REPORTS_DIR = path.join(PROJECT_ROOT, 'data', 'reports');
 
 interface MarketPipelineConfig {
   marketConfig: MarketConfig;
@@ -50,39 +50,6 @@ const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
     marketLabel: 'card',
   },
 };
-
-/** Check if cached report/analysis files exist on disk for a given match+market. */
-export function getCachedPaths(
-  homeTeam: string,
-  awayTeam: string,
-  date: string,
-  market: MarketType
-): { reportPath: string | null; analysisPath: string | null } {
-  const config = MARKET_CONFIGS[market];
-  // New layout: data/reports/{matchDir}/{market}.md
-  const relPath = buildReportFilename(homeTeam, awayTeam, date, config.toolName);
-  // Old flat layout: data/reports/{slug}-vs-{slug}-{date}-{market}.md
-  const matchDir = buildMatchDir(homeTeam, awayTeam, date);
-  const oldFlat = `${matchDir}-${config.toolName}.md`;
-
-  const candidates = [
-    path.join(REPORTS_DIR, relPath),
-    path.join(REPORTS_DIR, oldFlat),
-    path.join(PROJECT_ROOT, oldFlat),
-  ];
-
-  for (const reportPath of candidates) {
-    if (fs.existsSync(reportPath)) {
-      const analysisPath = reportPath.replace(/\.md$/, '-analysis.md');
-      return {
-        reportPath,
-        analysisPath: fs.existsSync(analysisPath) ? analysisPath : null,
-      };
-    }
-  }
-
-  return { reportPath: null, analysisPath: null };
-}
 
 /** Run the full pipeline for a job: collect data, then optionally analyze. */
 export async function runPipelineForJob(
