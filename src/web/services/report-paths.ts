@@ -6,7 +6,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
-import { buildReportFilename, buildMatchDir } from '../../cli-shared';
+import { buildReportFilename, buildMatchDir } from '../../utils/report-naming';
 import { MarketType } from './job-manager';
 
 export { buildReportFilename, buildMatchDir };

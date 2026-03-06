@@ -116,7 +116,11 @@ export function getSession(token: string): SessionUser | null {
     .update(encoded)
     .digest('base64url');
 
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expected);
+
+  // timingSafeEqual throws on length mismatch — reject early
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     return null;
   }
 

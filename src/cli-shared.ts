@@ -165,27 +165,22 @@ Prerequisites:
 }
 
 // ── Filename helpers ────────────────────────────────────────────────────────
+// Canonical implementations live in utils/report-naming.ts (no heavy deps).
+// Re-exported here for backward compatibility with existing callers.
 
-export function slug(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-}
+export { slug, buildMatchDir, buildReportFilename } from './utils/report-naming';
 
-/** Match directory name: {slug-a}-vs-{slug-b}-{date} */
-export function buildMatchDir(teamA: string, teamB: string, date: string): string {
-  return `${slug(teamA)}-vs-${slug(teamB)}-${date}`;
-}
-
-/** Report path within a match directory: {matchDir}/{market}.md */
-export function buildReportFilename(teamA: string, teamB: string, date: string, market: string): string {
-  return path.join(buildMatchDir(teamA, teamB, date), `${market}.md`);
-}
+import {
+  buildMatchDir as _buildMatchDir,
+  buildReportFilename as _buildReportFilename,
+} from './utils/report-naming';
 
 function buildAnalysisFilename(reportFilename: string): string {
   return reportFilename.replace(/\.md$/, '-analysis.md');
 }
 
 function buildNewsFilename(teamA: string, teamB: string, date: string): string {
-  return path.join(buildMatchDir(teamA, teamB, date), 'news.md');
+  return path.join(_buildMatchDir(teamA, teamB, date), 'news.md');
 }
 
 // ── Analysis runner ─────────────────────────────────────────────────────────
@@ -398,7 +393,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       matchNewsSummary,
     });
 
-    const reportFilename = buildReportFilename(args.teamA, args.teamB, args.date, toolName);
+    const reportFilename = _buildReportFilename(args.teamA, args.teamB, args.date, toolName);
     const reportDir = path.dirname(reportFilename);
     if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
     fs.writeFileSync(reportFilename, markdown, 'utf8');
