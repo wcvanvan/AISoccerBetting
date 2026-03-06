@@ -101,16 +101,32 @@ The report includes a "League Context" section with league-wide averages compute
 
 Synthesise Phase 1 into predictions. Walk through each factor in prose -- explain what pulls the estimate up or down and how much influence you give it. Use judgement, not mechanical weights.
 
+### League-average floor
+
+Your predicted total should rarely fall below the league average goals/match without STRONG justification. The league average exists because it reflects the baseline scoring environment. If your model produces a total significantly below league average (e.g. predicting 2.0 in a league averaging 2.8), you MUST explain why this specific match will deviate so far from baseline. Small H2H samples (< 5 games) and injury narratives are NOT sufficient justification alone -- these factors create uncertainty but should not override the strong prior of the league average.
+
+### BTTS calibration
+
+When the Poisson model's BTTS probability diverges significantly from venue-filtered empirical BTTS rates (e.g. model says 39% but venue data shows 88%), you MUST address this gap explicitly. The empirical rate from venue-filtered data (n >= 6) is often more reliable than the model because it captures game-state dynamics that Poisson's independence assumption misses: when a team concedes, the game opens up and both teams tend to score. Weight empirical venue-filtered BTTS rates at least 50% in your final BTTS estimate.
+
+### H2H sample discipline
+
+H2H data with < 5 games is directionally useful but statistically fragile. Do NOT anchor predictions heavily on small H2H samples. If the H2H average diverges substantially from both teams' broader scoring profiles, trust the broader profiles. A 3-game H2H averaging 1.33 goals should not drag a prediction far below 2 teams that individually average 1.5+ goals each.
+
 Predictions needed:
 1. **Team A goals scored** -- range and central estimate.
 2. **Team B goals scored** -- range and central estimate.
-3. **Total match goals** -- range and central estimate. Verify consistency with per-team sum.
+3. **Total match goals** -- range and central estimate. Verify consistency with per-team sum. Cross-check against league average.
 4. **Goal spread (A - B)** -- range and central estimate.
-5. **BTTS probability** -- point estimate.
+5. **BTTS probability** -- point estimate. Cross-check against venue-filtered empirical BTTS rates.
 6. **Match result probabilities** -- Home win, Draw, Away win (should sum to ~100%).
 7. **Clean sheet probabilities** -- for each team.
 
 For each team's goals-scored prediction, the **primary input** is that team's own scoring patterns (venue-filtered and all-games). The opponent's goals-conceded rate is **secondary context**. xG/npxG data should inform whether current scoring rates are sustainable. PPDA and deep completions provide process-level insight: a team creating many deep completions but with low xG conversion may be due for regression upward; a team with high PPDA (passive pressing) facing an aggressive presser may concede more than their baseline.
+
+### Game-state dynamics
+
+Poisson assumes independence between teams' goal-scoring, but real matches have correlated dynamics: red cards transform the game (10-man teams concede significantly more), early goals cause the trailing team to open up (increasing total goals), and penalty awards create "free" goals that the base lambda doesn't capture. When the match involves teams prone to red cards, early-goal-concession patterns, or referees with high penalty-award rates, adjust your total UPWARD from the pure Poisson estimate.
 
 ### Reconciliation
 

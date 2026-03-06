@@ -126,6 +126,10 @@ Cards are discrete counts. Use **Poisson** if variance ≈ mean, **Negative Bino
 For Poisson: P(X=k) = λ^k × e^(-λ) / k!
 For each threshold: P(Over N.5) = 1 - Σ P(X=0..N)
 
+### Red card probability
+
+Red cards are rare high-impact events that Poisson does not model well. Separately estimate the probability of at least one red card in the match based on: (a) both teams' red card history, (b) referee red card rate, (c) match intensity factors (derby, relegation battle). If P(red card) > 15%, add a tail-risk adjustment: red cards typically add +1-2 to the total card count and heavily skew the card spread toward the team receiving the red. Note this adjustment explicitly.
+
 ### Totals markets
 
 For each line in the odds: model probability vs implied probability. Show the edge calculation:

@@ -60,6 +60,68 @@ UNDERSTAT_LEAGUES = [
 
 TIMEOUT_SECONDS = 120
 
+# Team name aliases: maps common variants → ESPN canonical name.
+# Both keys and values are lowercased for matching.
+TEAM_ALIASES: dict[str, str] = {
+    "paris saint germain": "paris saint-germain",
+    "psg": "paris saint-germain",
+    "athletic bilbao": "athletic club",
+    "ath bilbao": "athletic club",
+    "atletico madrid": "atlético de madrid",
+    "atletico de madrid": "atlético de madrid",
+    "inter milan": "internazionale",
+    "inter": "internazionale",
+    "ac milan": "milan",
+    "spurs": "tottenham hotspur",
+    "tottenham": "tottenham hotspur",
+    "man united": "manchester united",
+    "man city": "manchester city",
+    "wolves": "wolverhampton wanderers",
+    "newcastle": "newcastle united",
+    "west ham": "west ham united",
+    "nottm forest": "nottingham forest",
+    "nott'm forest": "nottingham forest",
+    "sheffield utd": "sheffield united",
+    "betis": "real betis",
+    "hertha bsc": "hertha berlin",
+    "gladbach": "borussia m'gladbach",
+    "dortmund": "borussia dortmund",
+    "bayern": "bayern munich",
+    "leverkusen": "bayer leverkusen",
+    "st. etienne": "saint-étienne",
+    "saint etienne": "saint-étienne",
+    "marseille": "olympique de marseille",
+    "lyon": "olympique lyonnais",
+}
+
+
+def _normalize_team(name: str) -> str:
+    """Resolve a team name through aliases and strip hyphens/accents for matching."""
+    lower = name.lower().strip()
+    # Try exact alias match first
+    if lower in TEAM_ALIASES:
+        return TEAM_ALIASES[lower]
+    return lower
+
+
+def _team_matches(query: str, candidate: str) -> bool:
+    """Check if a team query matches a candidate name, handling aliases and hyphens."""
+    q = _normalize_team(query)
+    c = candidate.lower().strip()
+    # Direct substring match
+    if q in c or c in q:
+        return True
+    # Try stripping hyphens for both
+    q_stripped = q.replace("-", " ")
+    c_stripped = c.replace("-", " ")
+    if q_stripped in c_stripped or c_stripped in q_stripped:
+        return True
+    # Try alias on the candidate side too
+    c_aliased = _normalize_team(candidate)
+    if q in c_aliased or c_aliased in q:
+        return True
+    return False
+
 
 def get_leagues() -> list[str]:
     raw = os.environ.get("SOCCERDATA_LEAGUES", "").strip()
@@ -425,7 +487,6 @@ class DataAssembler:
         Matches without scores are treated as incomplete and skipped.
         """
         matches: list[dict[str, Any]] = []
-        norm_team = team.lower()
         now = pd.Timestamp.now(tz="UTC")
 
         # Reset index to access all columns
@@ -435,8 +496,8 @@ class DataAssembler:
             home = str(row.get("home_team", ""))
             away = str(row.get("away_team", ""))
 
-            is_home = norm_team in home.lower() or home.lower() in norm_team
-            is_away = norm_team in away.lower() or away.lower() in norm_team
+            is_home = _team_matches(team, home)
+            is_away = _team_matches(team, away)
             if not (is_home or is_away):
                 continue
 
@@ -504,8 +565,6 @@ class DataAssembler:
     ) -> list[dict[str, Any]]:
         """Find completed matches where both teams played each other."""
         rows: list[dict[str, Any]] = []
-        norm_a = team_a.lower()
-        norm_b = team_b.lower()
         now = pd.Timestamp.now(tz="UTC")
 
         df = schedule.reset_index() if schedule.index.names[0] is not None else schedule
@@ -514,10 +573,10 @@ class DataAssembler:
             home = str(row.get("home_team", ""))
             away = str(row.get("away_team", ""))
 
-            a_is_home = norm_a in home.lower() or home.lower() in norm_a
-            a_is_away = norm_a in away.lower() or away.lower() in norm_a
-            b_is_home = norm_b in home.lower() or home.lower() in norm_b
-            b_is_away = norm_b in away.lower() or away.lower() in norm_b
+            a_is_home = _team_matches(team_a, home)
+            a_is_away = _team_matches(team_a, away)
+            b_is_home = _team_matches(team_b, home)
+            b_is_away = _team_matches(team_b, away)
 
             if not ((a_is_home and b_is_away) or (a_is_away and b_is_home)):
                 continue
@@ -773,7 +832,6 @@ class DataAssembler:
         team: str,
     ) -> list[dict[str, Any]]:
         """Enrich matches with corners, stats, goals, cards, lineup from summary JSON."""
-        norm_team = team.lower()
 
         for match in matches:
             gid = match.get("game_id")
@@ -788,7 +846,7 @@ class DataAssembler:
 
             for i, td in enumerate(teams_data):
                 td_name = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
-                is_team = norm_team in td_name.lower() or td_name.lower() in norm_team
+                is_team = _team_matches(team, td_name)
 
                 if is_team:
                     team_idx = i
@@ -853,7 +911,7 @@ class DataAssembler:
             rosters = data.get("rosters", [])
             for i, roster in enumerate(rosters):
                 roster_team = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
-                if not (norm_team in roster_team.lower() or roster_team.lower() in norm_team):
+                if not _team_matches(team, roster_team):
                     continue
 
                 formation = roster.get("formation")
@@ -991,9 +1049,8 @@ class DataAssembler:
 
     @staticmethod
     def _fuzzy_team_match(name: str, candidate: str) -> bool:
-        """Check if team names match (case-insensitive, substring)."""
-        a, b = name.lower(), candidate.lower()
-        return a in b or b in a
+        """Check if team names match (case-insensitive, substring, alias-aware)."""
+        return _team_matches(name, candidate)
 
     @staticmethod
     def _parse_date(val: Any) -> str:
@@ -1294,13 +1351,11 @@ class DataAssembler:
         schedule = self._get_schedule()
         if schedule is not None and not schedule.empty:
             sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
-            norm_a = team_a.lower()
-            norm_b = team_b.lower()
             for _, row in sched.iterrows():
-                home = str(row.get("home_team", "")).lower()
-                away = str(row.get("away_team", "")).lower()
-                a_match = norm_a in home or home in norm_a or norm_a in away or away in norm_a
-                b_match = norm_b in home or home in norm_b or norm_b in away or away in norm_b
+                home = str(row.get("home_team", ""))
+                away = str(row.get("away_team", ""))
+                a_match = _team_matches(team_a, home) or _team_matches(team_a, away)
+                b_match = _team_matches(team_b, home) or _team_matches(team_b, away)
                 if a_match and b_match:
                     gid = row.get("game_id")
                     if gid and int(gid) in {int(p.stem.split("_")[1]) for p in cache_dir.glob("Summary_*.json") if "_" in p.stem}:
