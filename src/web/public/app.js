@@ -5,9 +5,11 @@
 // State
 let activeLeagues = new Set([
   'soccer_epl',
+  'soccer_fa_cup',
   'soccer_uefa_champs_league',
   'soccer_germany_bundesliga',
   'soccer_spain_la_liga',
+  'soccer_france_ligue_one',
 ]);
 let eventsData = [];
 let currentUser = null; // { username, role }
@@ -508,114 +510,21 @@ function restoreJobProgress(job) {
 
 async function renderCachedResults(jobId, hasAnalysis) {
   const resultsArea = document.getElementById('match-results');
-  resultsArea.innerHTML = '';
-
-  const tabs = document.createElement('div');
-  tabs.className = 'tabs';
-
-  const tabDefs = hasAnalysis
-    ? [
-        { key: 'concise', label: 'Value Picks' },
-        { key: 'analysis', label: 'Full Analysis' },
-        { key: 'raw', label: 'Data Report' },
-      ]
-    : [{ key: 'raw', label: 'Data Report' }];
-
-  tabDefs.forEach((t, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab' + (i === 0 ? ' active' : '');
-    btn.textContent = t.label;
-    btn.addEventListener('click', () => {
-      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadTabContent(jobId, t.key);
-    });
-    tabs.appendChild(btn);
+  await renderResultTabs(resultsArea, hasAnalysis, (container, tab) => {
+    return loadReportTab(container, '/api/reports/' + jobId + '/' + tab, jobId + ':' + tab);
   });
-
-  const content = document.createElement('div');
-  content.id = 'tab-content-' + jobId;
-
-  resultsArea.append(tabs, content);
-  await loadTabContent(jobId, tabDefs[0].key);
 }
 
-/**
- * Render cached results using match-based report routes (no job ID needed).
- * Used when viewing cached data from the match page.
- */
 async function renderMatchCachedResults(match, market, hasAnalysis) {
   const resultsArea = document.getElementById('match-results');
-  resultsArea.innerHTML = '';
-
-  const tabs = document.createElement('div');
-  tabs.className = 'tabs';
-
-  const tabDefs = hasAnalysis
-    ? [
-        { key: 'concise', label: 'Value Picks' },
-        { key: 'analysis', label: 'Full Analysis' },
-        { key: 'raw', label: 'Data Report' },
-      ]
-    : [{ key: 'raw', label: 'Data Report' }];
-
-  const contentKey = match.home_team + '|' + match.away_team + '|' + match.date + '|' + market;
-  const content = document.createElement('div');
-  content.id = 'tab-content-match';
-
-  tabDefs.forEach((t, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab' + (i === 0 ? ' active' : '');
-    btn.textContent = t.label;
-    btn.addEventListener('click', () => {
-      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadMatchTabContent(content, match, market, t.key, contentKey);
-    });
-    tabs.appendChild(btn);
+  const params = new URLSearchParams({
+    homeTeam: match.home_team, awayTeam: match.away_team,
+    date: match.date, market: market,
   });
-
-  resultsArea.append(tabs, content);
-  await loadMatchTabContent(content, match, market, tabDefs[0].key, contentKey);
-}
-
-async function loadMatchTabContent(container, match, market, tab, contentKey) {
-  const cacheKey = contentKey + ':' + tab;
-  if (tabCache[cacheKey]) {
-    container.innerHTML = '';
-    const body = document.createElement('div');
-    body.className = 'markdown-body';
-    body.innerHTML = tabCache[cacheKey];
-    container.appendChild(body);
-    return;
-  }
-
-  container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
-
-  try {
-    const params = new URLSearchParams({
-      homeTeam: match.home_team,
-      awayTeam: match.away_team,
-      date: match.date,
-      market: market,
-    });
-    const resp = await fetch('/api/match-report/' + tab + '?' + params);
-    const data = await resp.json();
-
-    if (data.error) {
-      container.innerHTML = '<div class="empty-state"><p>' + esc(data.error) + '</p></div>';
-      return;
-    }
-
-    tabCache[cacheKey] = data.html;
-    container.innerHTML = '';
-    const body = document.createElement('div');
-    body.className = 'markdown-body';
-    body.innerHTML = data.html;
-    container.appendChild(body);
-  } catch (err) {
-    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
-  }
+  const contentKey = match.home_team + '|' + match.away_team + '|' + match.date + '|' + market;
+  await renderResultTabs(resultsArea, hasAnalysis, (container, tab) => {
+    return loadReportTab(container, '/api/match-report/' + tab + '?' + params, contentKey + ':' + tab);
+  });
 }
 
 // ── Job launch + progress ───────────────────────────────────────────────────
@@ -850,14 +759,13 @@ function appendLog(jobId, message) {
   log.scrollTop = log.scrollHeight;
 }
 
-// ── Tab content loading ─────────────────────────────────────────────────────
+// ── Shared tab rendering ────────────────────────────────────────────────────
 
-async function loadTabContent(jobId, tab) {
-  const container = document.getElementById('tab-content-' + jobId);
-  if (!container) return;
-  const cacheKey = jobId + ':' + tab;
-
-  if (tabCache[cacheKey]) {
+/**
+ * Fetch and render a report tab. Uses tabCache when cacheKey is provided.
+ */
+async function loadReportTab(container, url, cacheKey) {
+  if (cacheKey && tabCache[cacheKey]) {
     container.innerHTML = '';
     const body = document.createElement('div');
     body.className = 'markdown-body';
@@ -867,17 +775,14 @@ async function loadTabContent(jobId, tab) {
   }
 
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
-
   try {
-    const resp = await fetch('/api/reports/' + jobId + '/' + tab);
+    const resp = await fetch(url);
     const data = await resp.json();
-
     if (data.error) {
       container.innerHTML = '<div class="empty-state"><p>' + esc(data.error) + '</p></div>';
       return;
     }
-
-    tabCache[cacheKey] = data.html;
+    if (cacheKey) tabCache[cacheKey] = data.html;
     container.innerHTML = '';
     const body = document.createElement('div');
     body.className = 'markdown-body';
@@ -886,6 +791,43 @@ async function loadTabContent(jobId, tab) {
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
   }
+}
+
+/**
+ * Build a tab bar (Value Picks / Full Analysis / Data Report) and wire up
+ * clicks to loadFn(container, tabKey). Returns a promise from loading the first tab.
+ */
+function renderResultTabs(targetEl, hasAnalysis, loadFn, opts) {
+  targetEl.innerHTML = '';
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs';
+
+  const tabDefs = hasAnalysis
+    ? [
+        { key: 'concise', label: 'Value Picks' },
+        { key: 'analysis', label: 'Full Analysis' },
+        { key: 'raw', label: 'Data Report' },
+      ]
+    : [{ key: 'raw', label: 'Data Report' }];
+
+  const content = document.createElement('div');
+  if (opts && opts.contentClass) content.className = opts.contentClass;
+
+  tabDefs.forEach((t, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (i === 0 ? ' active' : '');
+    btn.textContent = t.label;
+    btn.addEventListener('click', (e) => {
+      if (opts && opts.stopPropagation) e.stopPropagation();
+      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadFn(content, t.key);
+    });
+    tabs.appendChild(btn);
+  });
+
+  targetEl.append(tabs, content);
+  return loadFn(content, tabDefs[0].key);
 }
 
 // ── History ─────────────────────────────────────────────────────────────────
@@ -906,80 +848,101 @@ async function loadHistory() {
 
     container.innerHTML = '';
 
-    matches.forEach((match) => {
-      const item = document.createElement('div');
-      item.className = 'history-card';
+    // Split into upcoming (today+future) and past
+    const today = new Date().toISOString().slice(0, 10);
+    const upcoming = matches.filter((m) => m.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    const past = matches.filter((m) => m.date < today);
 
-      // Top row: teams
-      const topRow = document.createElement('div');
-      topRow.className = 'history-top-row';
-      topRow.style.cursor = 'pointer';
-      topRow.addEventListener('click', () => {
-        openMatchPage({
-          home_team: match.homeTeam,
-          away_team: match.awayTeam,
-          commence_time: match.date + 'T00:00:00Z',
-          league_key: '',
-          league_label: '',
-        });
-      });
+    if (upcoming.length > 0) {
+      const header = document.createElement('h3');
+      header.className = 'history-section-header';
+      header.textContent = 'Upcoming';
+      container.appendChild(header);
+      upcoming.forEach((match) => container.appendChild(renderHistoryCard(match)));
+    }
 
-      const teams = document.createElement('div');
-      teams.className = 'history-teams';
-      teams.textContent = match.homeTeam + ' vs ' + match.awayTeam;
-
-      topRow.appendChild(teams);
-      item.appendChild(topRow);
-
-      // Info row: date + market badges
-      const infoRow = document.createElement('div');
-      infoRow.className = 'history-info-row';
-
-      const dateSpan = document.createElement('span');
-      dateSpan.className = 'history-detail';
-      dateSpan.textContent = match.date;
-      infoRow.appendChild(dateSpan);
-
-      // Market badges with report/analysis status
-      const marketNames = ['goals', 'corners', 'cards'];
-      marketNames.forEach((mk) => {
-        const info = match.markets[mk];
-        if (!info) return;
-
-        const badge = document.createElement('span');
-        badge.className = 'history-market' + (info.hasAnalysis ? ' has-analysis' : '');
-        badge.textContent = mk.charAt(0).toUpperCase() + mk.slice(1);
-        badge.title = mk + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
-        badge.style.cursor = 'pointer';
-        badge.addEventListener('click', (e) => {
-          e.stopPropagation();
-          openHistoryReport(match, mk, item);
-        });
-        infoRow.appendChild(badge);
-      });
-
-      item.appendChild(infoRow);
-
-      // Timestamp row
-      const timeRow = document.createElement('div');
-      timeRow.className = 'history-time-row';
-      const modDate = new Date(match.lastModified).toLocaleString('en-GB', {
-        weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-      });
-      timeRow.textContent = 'Last updated ' + modDate;
-      item.appendChild(timeRow);
-
-      // Expandable report viewer area
-      const viewerArea = document.createElement('div');
-      viewerArea.className = 'history-viewer';
-      viewerArea.id = 'history-viewer-' + match.homeTeam + '-' + match.awayTeam + '-' + match.date;
-      item.appendChild(viewerArea);
-
-      container.appendChild(item);
-    });
+    if (past.length > 0) {
+      const header = document.createElement('h3');
+      header.className = 'history-section-header history-section-past';
+      header.textContent = 'Past';
+      container.appendChild(header);
+      past.forEach((match) => container.appendChild(renderHistoryCard(match)));
+    }
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
   }
+}
+
+function renderHistoryCard(match) {
+  const item = document.createElement('div');
+  item.className = 'history-card';
+
+  // Top row: teams
+  const topRow = document.createElement('div');
+  topRow.className = 'history-top-row';
+  topRow.style.cursor = 'pointer';
+  topRow.addEventListener('click', () => {
+    openMatchPage({
+      home_team: match.homeTeam,
+      away_team: match.awayTeam,
+      commence_time: match.date + 'T00:00:00Z',
+      league_key: '',
+      league_label: '',
+    });
+  });
+
+  const teams = document.createElement('div');
+  teams.className = 'history-teams';
+  teams.textContent = match.homeTeam + ' vs ' + match.awayTeam;
+
+  topRow.appendChild(teams);
+  item.appendChild(topRow);
+
+  // Info row: date + market badges
+  const infoRow = document.createElement('div');
+  infoRow.className = 'history-info-row';
+
+  const dateSpan = document.createElement('span');
+  dateSpan.className = 'history-detail';
+  dateSpan.textContent = match.date;
+  infoRow.appendChild(dateSpan);
+
+  // Market badges with report/analysis status
+  const marketNames = ['goals', 'corners', 'cards'];
+  marketNames.forEach((mk) => {
+    const info = match.markets[mk];
+    if (!info) return;
+
+    const badge = document.createElement('span');
+    badge.className = 'history-market' + (info.hasAnalysis ? ' has-analysis' : '');
+    badge.textContent = mk.charAt(0).toUpperCase() + mk.slice(1);
+    badge.title = mk + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
+    badge.style.cursor = 'pointer';
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openHistoryReport(match, mk, item);
+    });
+    infoRow.appendChild(badge);
+  });
+
+  item.appendChild(infoRow);
+
+  // Timestamp row
+  const timeRow = document.createElement('div');
+  timeRow.className = 'history-time-row';
+  const modDate = new Date(match.lastModified).toLocaleString('en-GB', {
+    weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  timeRow.textContent = 'Last updated ' + modDate;
+  item.appendChild(timeRow);
+
+  // Expandable report viewer area
+  const viewerArea = document.createElement('div');
+  viewerArea.className = 'history-viewer';
+  viewerArea.id = 'history-viewer-' + match.homeTeam + '-' + match.awayTeam + '-' + match.date;
+  item.appendChild(viewerArea);
+
+  return item;
 }
 
 async function openHistoryReport(match, market, cardEl) {
@@ -998,65 +961,13 @@ async function openHistoryReport(match, market, cardEl) {
   const marketInfo = match.markets[market];
   const hasAnalysis = marketInfo && marketInfo.hasAnalysis;
 
-  // Build tabs
-  viewer.innerHTML = '';
-  const tabs = document.createElement('div');
-  tabs.className = 'tabs';
-
-  const tabDefs = hasAnalysis
-    ? [
-        { key: 'concise', label: 'Value Picks' },
-        { key: 'analysis', label: 'Full Analysis' },
-        { key: 'raw', label: 'Data Report' },
-      ]
-    : [{ key: 'raw', label: 'Data Report' }];
-
-  const content = document.createElement('div');
-  content.className = 'history-tab-content';
-
-  tabDefs.forEach((t, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab' + (i === 0 ? ' active' : '');
-    btn.textContent = t.label;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadHistoryTabContent(content, match, market, t.key);
-    });
-    tabs.appendChild(btn);
+  const params = new URLSearchParams({
+    homeTeam: match.homeTeam, awayTeam: match.awayTeam,
+    date: match.date, market: market,
   });
-
-  viewer.append(tabs, content);
-  await loadHistoryTabContent(content, match, market, tabDefs[0].key);
-}
-
-async function loadHistoryTabContent(container, match, market, tab) {
-  container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
-
-  try {
-    const params = new URLSearchParams({
-      homeTeam: match.homeTeam,
-      awayTeam: match.awayTeam,
-      date: match.date,
-      market: market,
-    });
-    const resp = await fetch('/api/match-report/' + tab + '?' + params);
-    const data = await resp.json();
-
-    if (data.error) {
-      container.innerHTML = '<div class="empty-state"><p>' + esc(data.error) + '</p></div>';
-      return;
-    }
-
-    container.innerHTML = '';
-    const body = document.createElement('div');
-    body.className = 'markdown-body';
-    body.innerHTML = data.html;
-    container.appendChild(body);
-  } catch (err) {
-    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
-  }
+  await renderResultTabs(viewer, hasAnalysis, (container, tab) => {
+    return loadReportTab(container, '/api/match-report/' + tab + '?' + params);
+  }, { stopPropagation: true, contentClass: 'history-tab-content' });
 }
 
 // ── Utilities ───────────────────────────────────────────────────────────────

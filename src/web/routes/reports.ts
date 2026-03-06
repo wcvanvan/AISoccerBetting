@@ -33,6 +33,18 @@ function wrapTables(html: string): string {
   return html.replace(/<table[^>]*>/g, '<div class="table-wrap">$&').replace(/<\/table>/g, '</table></div>');
 }
 
+/** Render the concise (value picks) view from an analysis file, with caching. */
+function renderConcise(analysisPath: string): string {
+  const conciseKey = analysisPath + ':concise';
+  const stat = fs.statSync(analysisPath);
+  const entry = htmlCache.get(conciseKey);
+  if (entry && entry.mtime === stat.mtimeMs) return entry.html;
+  const markdown = fs.readFileSync(analysisPath, 'utf8');
+  const html = wrapTables(marked.parse(extractValuePicks(markdown)) as string);
+  htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
+  return html;
+}
+
 export async function reportsRoutes(app: FastifyInstance): Promise<void> {
   /** Get the raw data report as rendered HTML */
   app.get('/api/reports/:id/raw', async (request, reply) => {
@@ -49,7 +61,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Report not yet available' };
     }
 
-    const html = await renderCached(job.reportPath);
+    const html = renderCached(job.reportPath);
     return { html };
   });
 
@@ -68,7 +80,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Analysis not yet available' };
     }
 
-    const html = await renderCached(job.analysisPath);
+    const html = renderCached(job.analysisPath);
     return { html };
   });
 
@@ -87,20 +99,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'Analysis not yet available' };
     }
 
-    const markdown = fs.readFileSync(job.analysisPath, 'utf8');
-    const concise = extractValuePicks(markdown);
-    // Use a virtual key for concise cache (different from full analysis)
-    const conciseKey = job.analysisPath + ':concise';
-    const stat = fs.statSync(job.analysisPath);
-    const entry = htmlCache.get(conciseKey);
-    let html: string;
-    if (entry && entry.mtime === stat.mtimeMs) {
-      html = entry.html;
-    } else {
-      html = wrapTables(marked.parse(concise) as string);
-      htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
-    }
-    return { html };
+    return { html: renderConcise(job.analysisPath) };
   });
 
   /**
@@ -140,7 +139,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
         reply.status(404);
         return { error: 'Report not found' };
       }
-      const html = await renderCached(cached.reportPath);
+      const html = renderCached(cached.reportPath);
       return { html };
     }
 
@@ -149,7 +148,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
         reply.status(404);
         return { error: 'Analysis not found' };
       }
-      const html = await renderCached(cached.analysisPath);
+      const html = renderCached(cached.analysisPath);
       return { html };
     }
 
@@ -158,19 +157,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       reply.status(404);
       return { error: 'Analysis not found' };
     }
-    const markdown = fs.readFileSync(cached.analysisPath, 'utf8');
-    const concise = extractValuePicks(markdown);
-    const conciseKey = cached.analysisPath + ':concise';
-    const stat = fs.statSync(cached.analysisPath);
-    const entry = htmlCache.get(conciseKey);
-    let html: string;
-    if (entry && entry.mtime === stat.mtimeMs) {
-      html = entry.html;
-    } else {
-      html = wrapTables(marked.parse(concise) as string);
-      htmlCache.set(conciseKey, { mtime: stat.mtimeMs, html });
-    }
-    return { html };
+    return { html: renderConcise(cached.analysisPath) };
   });
 
   /** Check cache status for all markets of a given match */

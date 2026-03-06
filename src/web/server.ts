@@ -28,7 +28,8 @@ const PUBLIC_PATHS = ['/login.html', '/style.css', '/api/login', '/api/config'];
 const READONLY = process.env.READONLY_MODE === '1';
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// Rate limiter for login attempts (in-memory, per IP)
+// Rate limiter for login attempts (in-memory, per IP).
+// Note: ineffective on serverless (fresh state per cold start) but useful for local dev.
 const loginAttempts = new Map<string, { count: number; lastAttempt: number }>();
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW = 60_000; // 60 seconds
@@ -62,10 +63,8 @@ export async function createServer() {
   app.addHook('onRequest', async (request, reply) => {
     const urlPath = request.url.split('?')[0];
 
-    // Allow public paths (login page, css, fonts, login API)
+    // Allow public paths (login page, css, login API, config)
     if (PUBLIC_PATHS.some((p) => urlPath === p)) return;
-    // Allow Google Fonts requests (external, won't hit this)
-    if (urlPath.startsWith('/api/login')) return;
 
     const token = request.cookies[SESSION_COOKIE];
     if (token) {

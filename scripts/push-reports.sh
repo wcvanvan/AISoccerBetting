@@ -3,5 +3,9 @@
 set -e
 
 git add data/reports/
-git commit -m "update reports $(date +%Y-%m-%d)" || echo "No new reports to commit"
+if git diff --cached --quiet; then
+  echo "No new reports to commit"
+  exit 0
+fi
+git commit -m "update reports $(date +%Y-%m-%d)"
 git push

@@ -17,7 +17,7 @@ import {
   MarketConfig,
 } from '../../odds';
 import { FormatOptions } from '../../formatter';
-import { buildReportFilename } from '../../cli-shared';
+import { buildReportFilename } from '../../utils/report-naming';
 import { jobManager, Job, MarketType } from './job-manager';
 import { REPORTS_DIR } from './report-paths';
 
@@ -76,7 +76,7 @@ export async function runPipelineForJob(
       jobManager.setComplete(job.id);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = (err instanceof Error) ? err.message : String(err);
     jobManager.setError(job.id, msg);
   } finally {
     jobManager.dequeue();

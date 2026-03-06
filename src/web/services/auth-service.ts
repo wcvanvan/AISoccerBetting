@@ -63,8 +63,8 @@ function loadUsers(): Record<string, { password: string; role: UserRole }> {
   if (adminPass) users.admin = { password: adminPass, role: 'admin' };
   if (readerPass) users.reader = { password: readerPass, role: 'reader' };
 
-  // Built-in defaults when no env config is provided
-  if (Object.keys(users).length === 0) {
+  // Dev-only defaults — never active in production
+  if (Object.keys(users).length === 0 && process.env.NODE_ENV !== 'production') {
     users.admin = { password: '020710', role: 'admin' };
     users.james = { password: 'thankyou', role: 'reader' };
   }
@@ -84,7 +84,12 @@ export function authenticate(
   password: string
 ): SessionUser | null {
   const user = getUsers()[username];
-  if (!user || user.password !== password) return null;
+  if (!user) return null;
+  const expected = Buffer.from(user.password);
+  const actual = Buffer.from(password);
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    return null;
+  }
   return { username, role: user.role };
 }
 

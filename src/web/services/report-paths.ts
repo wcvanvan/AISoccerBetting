@@ -9,17 +9,8 @@ import * as fs from 'fs';
 import { buildReportFilename, buildMatchDir } from '../../utils/report-naming';
 import { MarketType } from './job-manager';
 
-export { buildReportFilename, buildMatchDir };
-
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 export const REPORTS_DIR = path.join(PROJECT_ROOT, 'data', 'reports');
-
-/** Minimal market config — only the fields needed for path resolution. */
-const MARKET_TOOL_NAMES: Record<MarketType, string> = {
-  corners: 'corners',
-  goals: 'goals',
-  cards: 'cards',
-};
 
 /** Check if cached report/analysis files exist on disk for a given match+market. */
 export function getCachedPaths(
@@ -28,12 +19,11 @@ export function getCachedPaths(
   date: string,
   market: MarketType
 ): { reportPath: string | null; analysisPath: string | null } {
-  const toolName = MARKET_TOOL_NAMES[market];
   // New layout: data/reports/{matchDir}/{market}.md
-  const relPath = buildReportFilename(homeTeam, awayTeam, date, toolName);
+  const relPath = buildReportFilename(homeTeam, awayTeam, date, market);
   // Old flat layout: data/reports/{slug}-vs-{slug}-{date}-{market}.md
   const matchDir = buildMatchDir(homeTeam, awayTeam, date);
-  const oldFlat = `${matchDir}-${toolName}.md`;
+  const oldFlat = `${matchDir}-${market}.md`;
 
   const candidates = [
     path.join(REPORTS_DIR, relPath),

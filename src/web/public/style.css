@@ -252,6 +252,11 @@ main { padding: 20px 0; }
   color: #a78bfa;
 }
 
+.league-badge[data-league="soccer_fa_cup"] {
+  background: rgba(220, 38, 38, 0.12);
+  color: #f87171;
+}
+
 .league-badge[data-league="soccer_uefa_champs_league"] {
   background: rgba(6, 182, 212, 0.12);
   color: var(--cyan);
@@ -265,6 +270,11 @@ main { padding: 20px 0; }
 .league-badge[data-league="soccer_spain_la_liga"] {
   background: rgba(249, 115, 22, 0.12);
   color: #fdba74;
+}
+
+.league-badge[data-league="soccer_france_ligue_one"] {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
 }
 
 .match-date {
@@ -581,6 +591,20 @@ input[type="text"].market-select::placeholder {
 }
 
 /* ── History list ───────────────────────────────────────────────────────── */
+.history-section-header {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  margin: 0 0 10px;
+}
+
+.history-section-past {
+  color: var(--text-dim);
+  margin-top: 24px;
+}
+
 .history-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
