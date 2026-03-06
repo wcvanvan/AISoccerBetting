@@ -1,6 +1,6 @@
 # AISoccerBetting
 
-Multi-market soccer betting data collector and analysis pipeline.
+Multi-market soccer betting analysis tool with a web dashboard and CLI pipelines. Collects match data from ESPN and Understat, fetches betting odds, and runs AI-powered analysis via Claude.
 
 ## Setup
 
@@ -17,15 +17,31 @@ Optional (for API-based analysis/news — not needed with Claude Code subagents)
 - `ANTHROPIC_API_KEY` — [console.anthropic.com](https://console.anthropic.com)
 - `TAVILY_API_KEY` — free tier at [app.tavily.com](https://app.tavily.com)
 
+## Web UI
+
+```bash
+npm run web
+```
+
+Starts a Fastify server at `http://localhost:3000`. The web dashboard is the primary way to use the tool — browse upcoming matches, run analysis pipelines, and review results all from the browser.
+
+Two roles are supported:
+- **Admin** — can launch data collection and analysis jobs
+- **Reader** — read-only access to cached results
+
+Configure credentials via `WEB_ADMIN_PASSWORD` / `WEB_READER_PASSWORD` in `.env` (see `.env.example`).
+
 ## Markets
 
-| Market | Command | Data | Odds |
-|--------|---------|------|------|
+| Market | CLI command | Data collected | Odds markets |
+|--------|-------------|----------------|--------------|
 | Corners | `npm run corners` | corners won/conceded, xG | alt totals, alt spreads |
 | Goals | `npm run goals` | xG, npxG, shots, goals+scorers, HT scores, PPDA, deep completions | moneyline, spreads, totals, BTTS, double chance |
 | Cards | `npm run cards` | YC/RC, fouls, tackles, interceptions, card events, referee stats | alt totals, alt spreads |
 
 ## CLI Commands
+
+The CLI is useful for scripting, automation, or when you prefer the terminal.
 
 ### Collect data + generate report
 
@@ -73,14 +89,6 @@ Configure bookmakers via `ODDS_BOOKMAKERS` and leagues via `ODDS_SPORT_KEYS` in 
 ```bash
 npm run test:connection
 ```
-
-### Web UI
-
-```bash
-npm run web
-```
-
-Starts a Fastify server at `http://localhost:3000` with match browsing, data collection, and analysis. Configure auth via `WEB_ADMIN_PASSWORD` / `WEB_READER_PASSWORD` in `.env` (see `.env.example`).
 
 ## Data Sources
 
