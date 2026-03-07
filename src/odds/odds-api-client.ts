@@ -47,10 +47,10 @@ export class OddsApiClient {
 
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 
-    // Log remaining API quota
+    // Log remaining API quota (debug level — only visible with DEBUG=odds-api)
     const remaining = res.headers.get('x-requests-remaining');
     const used = res.headers.get('x-requests-used');
-    if (remaining != null) {
+    if (remaining != null && process.env.DEBUG?.includes('odds-api')) {
       console.error(`  [odds-api] ${remaining} requests remaining (${used ?? '?'} used)`);
     }
 
