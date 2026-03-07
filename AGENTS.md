@@ -107,10 +107,11 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 ### Web UI (src/web/)
 
 - Fastify server with vanilla HTML/CSS/JS frontend (no framework), dark theme.
-- Session-based auth with env-configured users (admin = full access, reader = view cached results only).
+- Session-based auth with env-configured users (admin = full access, reader = view cached results only; History nav hidden for readers).
+- Matches page: date-paged view with pill navigation (keyboard left/right), matches grouped by league per date. Data merged from Odds API + history reports. Auto-lands on today or nearest future date.
 - Job queue: max 1 concurrent, with SSE progress streaming.
 - Analysis shells out to `claude --print` CLI (avoids API costs when running locally).
-- Reports stored in `data/reports/` (gitignored).
+- Reports stored in `data/reports/` with `meta.json` for league metadata.
 
 ## Output files
 
