@@ -72,44 +72,29 @@ function showPage(page) {
 // ── Events / Matches ────────────────────────────────────────────────────────
 
 async function loadEvents() {
-  const container = document.getElementById('events-container');
+  var container = document.getElementById('events-container');
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading matches...</div>';
 
-  // Reader accounts: load all matches from history (reports), grouped by date
-  if (currentUser && currentUser.role === 'reader') {
-    await loadReaderMatches(container);
-    return;
-  }
+  var oddsEvents = [];
+  var historyEvents = [];
+  var leagues = [];
 
+  // Fetch Odds API events
   try {
-    const resp = await fetch('/api/events');
-    const data = await resp.json();
-
-    if (data.error) {
-      await loadEventsFromHistory(container);
-      return;
+    var resp = await fetch('/api/events');
+    var data = await resp.json();
+    if (!data.error) {
+      oddsEvents = data.events || [];
+      leagues = data.leagues || [];
     }
+  } catch (_) {}
 
-    eventsData = data.events || [];
-    renderLeagueFilters(data.leagues || []);
-    renderEvents(eventsData);
-  } catch (err) {
-    await loadEventsFromHistory(container);
-  }
-}
-
-async function loadReaderMatches(container) {
+  // Fetch history (reports on disk)
   try {
-    const resp = await fetch('/api/history');
-    const data = await resp.json();
-    const matches = data.matches || [];
-
-    if (matches.length === 0) {
-      container.innerHTML = '<div class="empty-state"><h3>No matches available</h3><p>No analyzed matches yet.</p></div>';
-      return;
-    }
-
-    eventsData = matches.map(function (m) {
+    var resp2 = await fetch('/api/history');
+    var data2 = await resp2.json();
+    var matches = data2.matches || [];
+    historyEvents = matches.map(function (m) {
       return {
         home_team: m.homeTeam,
         away_team: m.awayTeam,
@@ -119,83 +104,60 @@ async function loadReaderMatches(container) {
         markets: m.markets || {},
       };
     });
+  } catch (_) {}
 
-    // Build league filters from discovered leagues
-    var leagueMap = {};
-    eventsData.forEach(function (e) {
-      if (e.league_key && e.league_label) {
-        leagueMap[e.league_key] = e.league_label;
-      }
-    });
-    var leagues = Object.keys(leagueMap).map(function (k) {
-      return { key: k, label: leagueMap[k] };
-    });
-    if (leagues.length > 0) {
-      leagues.forEach(function (l) { activeLeagues.add(l.key); });
-      renderLeagueFilters(leagues);
+  // Merge: start with odds events, add history-only matches
+  var seen = new Set();
+  oddsEvents.forEach(function (e) {
+    seen.add(e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10));
+  });
+  var merged = oddsEvents.slice();
+  historyEvents.forEach(function (e) {
+    var key = e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(e);
     } else {
-      document.getElementById('league-filters').innerHTML = '';
+      // Enrich odds event with markets data from history
+      var existing = merged.find(function (m) {
+        return m.home_team === e.home_team && m.away_team === e.away_team &&
+          m.commence_time.slice(0, 10) === e.commence_time.slice(0, 10);
+      });
+      if (existing && e.markets) existing.markets = e.markets;
     }
+  });
 
-    var heading = document.querySelector('#page-matches .section-title');
-    if (heading) {
-      heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ')</span>';
-    }
-
-    renderGroupedEvents(eventsData);
-  } catch (err) {
-    container.innerHTML = '<div class="empty-state"><h3>Failed to load</h3><p>' + esc(err.message) + '</p></div>';
+  if (merged.length === 0) {
+    container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>No event data or cached reports available.</p></div>';
+    return;
   }
-}
 
-async function loadEventsFromHistory(container) {
-  try {
-    const resp = await fetch('/api/history');
-    const data = await resp.json();
-    const matches = data.matches || [];
+  eventsData = merged;
 
-    if (matches.length === 0) {
-      container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>No event data or cached reports available.</p></div>';
-      return;
-    }
-
-    eventsData = matches.map(function (m) {
-      return {
-        home_team: m.homeTeam,
-        away_team: m.awayTeam,
-        commence_time: m.date + 'T00:00:00Z',
-        league_key: m.leagueKey || '',
-        league_label: m.leagueLabel || '',
-      };
-    });
-
-    // Build league filters from discovered leagues
-    var leagueMap = {};
-    eventsData.forEach(function (e) {
-      if (e.league_key && e.league_label) {
-        leagueMap[e.league_key] = e.league_label;
-      }
-    });
-    var leagues = Object.keys(leagueMap).map(function (k) {
-      return { key: k, label: leagueMap[k] };
-    });
-    if (leagues.length > 0) {
-      // Ensure discovered leagues are active by default
-      leagues.forEach(function (l) { activeLeagues.add(l.key); });
-      renderLeagueFilters(leagues);
-    } else {
-      document.getElementById('league-filters').innerHTML = '';
-    }
-
-    renderEvents(eventsData);
-
-    var heading = document.querySelector('#page-matches .section-title');
-    if (heading) {
-      heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ' from reports)</span>';
-    }
-  } catch (err) {
-    container.innerHTML = '<div class="empty-state"><h3>Failed to load</h3><p>' + esc(err.message) + '</p></div>';
+  // Build league filters
+  var leagueMap = {};
+  if (leagues.length > 0) {
+    leagues.forEach(function (l) { leagueMap[l.key] = l.label; });
   }
+  eventsData.forEach(function (e) {
+    if (e.league_key && e.league_label) leagueMap[e.league_key] = e.league_label;
+  });
+  var leagueList = Object.keys(leagueMap).map(function (k) {
+    return { key: k, label: leagueMap[k] };
+  });
+  if (leagueList.length > 0) {
+    leagueList.forEach(function (l) { activeLeagues.add(l.key); });
+    renderLeagueFilters(leagueList);
+  } else {
+    document.getElementById('league-filters').innerHTML = '';
+  }
+
+  var heading = document.querySelector('#page-matches .section-title');
+  if (heading) {
+    heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ')</span>';
+  }
+
+  renderEvents(eventsData);
 }
 
 function renderLeagueFilters(leagues) {
@@ -221,15 +183,10 @@ function toggleLeague(key) {
   } else {
     activeLeagues.add(key);
   }
-  document.querySelectorAll('.filter-chip').forEach((chip) => {
+  document.querySelectorAll('.filter-chip').forEach(function (chip) {
     chip.classList.toggle('active', activeLeagues.has(chip.dataset.league));
   });
-  // Use correct filter function depending on which view is active
-  if (document.querySelector('.date-group')) {
-    applyGroupedFilters();
-  } else {
-    applyAllFilters();
-  }
+  applyFilters();
 }
 
 function fuzzyMatch(query, text) {
@@ -239,124 +196,43 @@ function fuzzyMatch(query, text) {
   return words.every(function (w) { return lowerText.indexOf(w) !== -1; });
 }
 
-function applyAllFilters() {
+function applyFilters() {
   var homeEl = document.getElementById('filter-home');
   var awayEl = document.getElementById('filter-away');
   var home = (homeEl ? homeEl.value : '').trim();
   var away = (awayEl ? awayEl.value : '').trim();
   var tbody = document.querySelector('.events-table tbody');
   if (!tbody) return;
+
   var rows = tbody.querySelectorAll('tr');
-  eventsData.forEach(function (e, idx) {
-    if (!rows[idx]) return;
-    var leagueOk = !e.league_key || activeLeagues.has(e.league_key);
-    var homeOk = fuzzyMatch(home, e.home_team);
-    var awayOk = fuzzyMatch(away, e.away_team);
-    rows[idx].style.display = (leagueOk && homeOk && awayOk) ? '' : 'none';
+  // Track which date separator rows should be visible
+  var currentDateRow = null;
+  var anyVisibleInGroup = false;
+
+  rows.forEach(function (row) {
+    if (row.classList.contains('date-separator-row')) {
+      // Before moving to next group, update previous date row visibility
+      if (currentDateRow) currentDateRow.style.display = anyVisibleInGroup ? '' : 'none';
+      currentDateRow = row;
+      anyVisibleInGroup = false;
+      return;
+    }
+    var homeTeam = row.querySelectorAll('.team-name')[0]?.textContent || '';
+    var awayTeam = row.querySelectorAll('.team-name')[1]?.textContent || '';
+    var leagueKey = row.querySelector('.league-badge')?.dataset?.league || '';
+
+    var leagueOk = !leagueKey || activeLeagues.has(leagueKey);
+    var homeOk = fuzzyMatch(home, homeTeam);
+    var awayOk = fuzzyMatch(away, awayTeam);
+    var visible = leagueOk && homeOk && awayOk;
+    row.style.display = visible ? '' : 'none';
+    if (visible) anyVisibleInGroup = true;
   });
+  // Handle last group
+  if (currentDateRow) currentDateRow.style.display = anyVisibleInGroup ? '' : 'none';
 }
 
 function renderEvents(events) {
-  const container = document.getElementById('events-container');
-
-  if (events.length === 0) {
-    container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>Try enabling more leagues.</p></div>';
-    return;
-  }
-
-  // Update match count and timestamp in heading
-  const heading = document.querySelector('#page-matches .section-title');
-  if (heading) {
-    const timeStr = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    heading.innerHTML = 'Upcoming Matches <span class="match-count">(' + events.length + ' &middot; updated ' + timeStr + ')</span>';
-  }
-
-  container.innerHTML = '';
-
-  // Team search filter
-  const filterForm = document.createElement('div');
-  filterForm.className = 'card';
-  filterForm.style.marginBottom = '16px';
-  filterForm.innerHTML =
-    '<div class="section-title" style="margin-bottom: 12px">Search</div>' +
-    '<div style="display: flex; gap: 10px; align-items: end; flex-wrap: wrap">' +
-    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Home Team</label>' +
-    '  <input type="text" id="filter-home" class="market-select" style="width: 180px" placeholder="e.g. Arsenal"></div>' +
-    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Away Team</label>' +
-    '  <input type="text" id="filter-away" class="market-select" style="width: 180px" placeholder="e.g. Chelsea"></div>' +
-    '</div>';
-  container.appendChild(filterForm);
-
-  document.getElementById('filter-home').addEventListener('input', applyAllFilters);
-  document.getElementById('filter-away').addEventListener('input', applyAllFilters);
-
-  // Events table
-  const table = document.createElement('table');
-  table.className = 'events-table';
-
-  const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Analyzed by AI</th></tr>';
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  events.forEach((e, idx) => {
-    const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
-    tr.addEventListener('click', () => openMatchPage(e));
-
-    const date = new Date(e.commence_time);
-    const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: 'numeric' });
-    const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
-    // Date cell
-    const tdDate = document.createElement('td');
-    tdDate.innerHTML = '<div class="match-date">' + esc(dateStr) + '</div><div class="match-date">' + esc(timeStr) + '</div>';
-    tr.appendChild(tdDate);
-
-    // Match cell
-    const tdMatch = document.createElement('td');
-    const homeSpan = document.createElement('span');
-    homeSpan.className = 'team-name';
-    homeSpan.textContent = e.home_team;
-    const vsSpan = document.createElement('span');
-    vsSpan.className = 'vs';
-    vsSpan.textContent = 'vs';
-    const awaySpan = document.createElement('span');
-    awaySpan.className = 'team-name';
-    awaySpan.textContent = e.away_team;
-    tdMatch.append(homeSpan, vsSpan, awaySpan);
-    tr.appendChild(tdMatch);
-
-    // League cell
-    const tdLeague = document.createElement('td');
-    const badge = document.createElement('span');
-    badge.className = 'league-badge';
-    badge.dataset.league = e.league_key;
-    badge.textContent = e.league_label;
-    tdLeague.appendChild(badge);
-    tr.appendChild(tdLeague);
-
-    // Cache status cell
-    const tdCache = document.createElement('td');
-    tdCache.className = 'cache-cell';
-    tdCache.id = 'cache-' + idx;
-    tdCache.innerHTML = '<span class="cache-loading">...</span>';
-    tr.appendChild(tdCache);
-
-    tbody.appendChild(tr);
-  });
-
-  table.appendChild(tbody);
-  container.appendChild(table);
-
-  // Apply active filters to newly rendered rows
-  applyAllFilters();
-
-  // Fetch cache status for each event (batched, non-blocking)
-  loadCacheStatuses(events);
-}
-
-function renderGroupedEvents(events) {
   var container = document.getElementById('events-container');
 
   if (events.length === 0) {
@@ -380,8 +256,8 @@ function renderGroupedEvents(events) {
     '</div>';
   container.appendChild(filterForm);
 
-  document.getElementById('filter-home').addEventListener('input', applyGroupedFilters);
-  document.getElementById('filter-away').addEventListener('input', applyGroupedFilters);
+  document.getElementById('filter-home').addEventListener('input', applyFilters);
+  document.getElementById('filter-away').addEventListener('input', applyFilters);
 
   // Sort events by date ascending (oldest first)
   var sorted = events.slice().sort(function (a, b) {
@@ -401,39 +277,40 @@ function renderGroupedEvents(events) {
   });
 
   var todayStr = new Date().toISOString().slice(0, 10);
-  var todayEl = null;
+  var todayDateRow = null;
 
-  // Render each date group
+  // Single table with one header
+  var table = document.createElement('table');
+  table.className = 'events-table';
+
+  var thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>Match</th><th class="col-right">League</th><th class="col-right">Analyzed by AI</th></tr>';
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+
   groups.forEach(function (group) {
-    var section = document.createElement('div');
-    section.className = 'date-group';
-    section.dataset.date = group.date;
-
-    // Date separator header
-    var header = document.createElement('div');
-    header.className = 'date-group-header';
+    // Date separator row
+    var dateTr = document.createElement('tr');
+    dateTr.className = 'date-separator-row';
+    dateTr.dataset.date = group.date;
+    var dateTd = document.createElement('td');
+    dateTd.colSpan = 3;
+    dateTd.className = 'date-separator';
     var d = new Date(group.date + 'T12:00:00Z');
     var label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     if (group.date === todayStr) {
       label += ' — Today';
-      header.classList.add('date-group-today');
-      todayEl = section;
+      dateTd.classList.add('date-separator-today');
+      todayDateRow = dateTr;
     }
-    header.textContent = label;
-    section.appendChild(header);
+    dateTd.textContent = label;
+    dateTr.appendChild(dateTd);
+    tbody.appendChild(dateTr);
 
-    // Table for this group
-    var table = document.createElement('table');
-    table.className = 'events-table grouped-table';
-
-    var thead = document.createElement('thead');
-    thead.innerHTML = '<tr><th>Match</th><th>League</th><th>Analyzed by AI</th></tr>';
-    table.appendChild(thead);
-
-    var tbody = document.createElement('tbody');
+    // Match rows for this group
     group.events.forEach(function (e) {
       var tr = document.createElement('tr');
-      tr.className = 'grouped-row';
       tr.style.cursor = 'pointer';
       tr.addEventListener('click', function () { openMatchPage(e); });
 
@@ -451,8 +328,9 @@ function renderGroupedEvents(events) {
       tdMatch.append(homeSpan, vsSpan, awaySpan);
       tr.appendChild(tdMatch);
 
-      // League cell
+      // League cell (right-aligned)
       var tdLeague = document.createElement('td');
+      tdLeague.className = 'col-right';
       if (e.league_label) {
         var badge = document.createElement('span');
         badge.className = 'league-badge';
@@ -462,34 +340,36 @@ function renderGroupedEvents(events) {
       }
       tr.appendChild(tdLeague);
 
-      // Analyzed status cell — use inline markets data from history
+      // Analyzed status cell (right-aligned)
       var tdCache = document.createElement('td');
-      tdCache.className = 'cache-cell';
+      tdCache.className = 'cache-cell col-right';
       if (e.markets && Object.keys(e.markets).length > 0) {
         renderInlineMarketBadges(tdCache, e.markets);
       } else {
-        tdCache.innerHTML = '<span class="cache-none">&mdash;</span>';
+        tdCache.id = 'cache-' + e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
+        tdCache.innerHTML = '<span class="cache-loading">...</span>';
       }
       tr.appendChild(tdCache);
 
       tbody.appendChild(tr);
     });
-
-    table.appendChild(tbody);
-    section.appendChild(table);
-    container.appendChild(section);
   });
 
-  applyGroupedFilters();
+  table.appendChild(tbody);
+  container.appendChild(table);
+
+  applyFilters();
+
+  // Fetch cache status for events without inline markets data
+  loadCacheStatuses(events);
 
   // Scroll to today's matches (or nearest future date)
-  var scrollTarget = todayEl;
+  var scrollTarget = todayDateRow;
   if (!scrollTarget) {
-    // Find first future date group
-    var futureGroups = document.querySelectorAll('.date-group');
-    for (var i = 0; i < futureGroups.length; i++) {
-      if (futureGroups[i].dataset.date >= todayStr) {
-        scrollTarget = futureGroups[i];
+    var dateRows = tbody.querySelectorAll('.date-separator-row');
+    for (var i = 0; i < dateRows.length; i++) {
+      if (dateRows[i].dataset.date >= todayStr) {
+        scrollTarget = dateRows[i];
         break;
       }
     }
@@ -522,76 +402,49 @@ function renderInlineMarketBadges(cell, markets) {
   }
 }
 
-function applyGroupedFilters() {
-  var homeEl = document.getElementById('filter-home');
-  var awayEl = document.getElementById('filter-away');
-  var home = (homeEl ? homeEl.value : '').trim();
-  var away = (awayEl ? awayEl.value : '').trim();
-
-  var groups = document.querySelectorAll('.date-group');
-  groups.forEach(function (group) {
-    var rows = group.querySelectorAll('.grouped-row');
-    var anyVisible = false;
-
-    rows.forEach(function (row) {
-      var homeTeam = row.querySelectorAll('.team-name')[0]?.textContent || '';
-      var awayTeam = row.querySelectorAll('.team-name')[1]?.textContent || '';
-      var leagueKey = row.querySelector('.league-badge')?.dataset?.league || '';
-
-      var leagueOk = !leagueKey || activeLeagues.has(leagueKey);
-      var homeOk = fuzzyMatch(home, homeTeam);
-      var awayOk = fuzzyMatch(away, awayTeam);
-      var visible = leagueOk && homeOk && awayOk;
-      row.style.display = visible ? '' : 'none';
-      if (visible) anyVisible = true;
-    });
-
-    // Hide entire date group if no matches visible
-    group.style.display = anyVisible ? '' : 'none';
-  });
-}
-
 async function loadCacheStatuses(events) {
-  const seen = new Set();
-  const tasks = [];
-  events.forEach((e, idx) => {
-    const key = e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
+  var seen = new Set();
+  var tasks = [];
+  events.forEach(function (e) {
+    // Skip events that already have inline markets data
+    if (e.markets && Object.keys(e.markets).length > 0) return;
+    var key = e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
     if (seen.has(key)) return;
     seen.add(key);
-    tasks.push({ idx, e });
+    tasks.push({ key: key, e: e });
   });
 
-  for (let i = 0; i < tasks.length; i += 6) {
-    const batch = tasks.slice(i, i + 6);
-    await Promise.all(batch.map(async ({ idx, e }) => {
+  for (var i = 0; i < tasks.length; i += 6) {
+    var batch = tasks.slice(i, i + 6);
+    await Promise.all(batch.map(async function (t) {
       try {
-        const params = new URLSearchParams({
-          homeTeam: e.home_team,
-          awayTeam: e.away_team,
-          date: e.commence_time.slice(0, 10),
+        var params = new URLSearchParams({
+          homeTeam: t.e.home_team,
+          awayTeam: t.e.away_team,
+          date: t.e.commence_time.slice(0, 10),
         });
-        const resp = await fetch('/api/cache-status?' + params);
-        const data = await resp.json();
-        renderCacheBadges(idx, data.markets || {});
+        var resp = await fetch('/api/cache-status?' + params);
+        var data = await resp.json();
+        renderCacheBadges(t.key, data.markets || {});
       } catch (_) {
-        const cell = document.getElementById('cache-' + idx);
+        var cell = document.getElementById('cache-' + t.key);
         if (cell) cell.innerHTML = '';
       }
     }));
   }
 }
 
-function renderCacheBadges(idx, markets) {
-  const cell = document.getElementById('cache-' + idx);
+function renderCacheBadges(key, markets) {
+  var cell = document.getElementById('cache-' + key);
   if (!cell) return;
   cell.innerHTML = '';
-  const marketNames = ['goals', 'corners', 'cards'];
-  let hasSome = false;
-  marketNames.forEach((m) => {
-    const info = markets[m];
+  var marketNames = ['goals', 'corners', 'cards'];
+  var hasSome = false;
+  marketNames.forEach(function (m) {
+    var info = markets[m];
     if (info && (info.hasReport || info.hasAnalysis)) {
       hasSome = true;
-      const badge = document.createElement('span');
+      var badge = document.createElement('span');
       badge.className = 'cache-badge' + (info.hasAnalysis ? ' cache-full' : ' cache-partial');
       badge.title = m + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
       badge.textContent = m.charAt(0).toUpperCase() + m.slice(1);
