@@ -80,8 +80,7 @@ async function loadEvents() {
 
     eventsData = data.events || [];
     renderLeagueFilters(data.leagues || []);
-    const filtered = eventsData.filter((e) => activeLeagues.has(e.league_key));
-    renderEvents(filtered);
+    renderEvents(eventsData);
   } catch (err) {
     await loadEventsFromHistory(container);
   }
@@ -146,8 +145,31 @@ function toggleLeague(key) {
   document.querySelectorAll('.filter-chip').forEach((chip) => {
     chip.classList.toggle('active', activeLeagues.has(chip.dataset.league));
   });
-  const filtered = eventsData.filter((e) => activeLeagues.has(e.league_key));
-  renderEvents(filtered);
+  applyAllFilters();
+}
+
+function fuzzyMatch(query, text) {
+  if (!query) return true;
+  var lowerText = text.toLowerCase();
+  var words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.every(function (w) { return lowerText.indexOf(w) !== -1; });
+}
+
+function applyAllFilters() {
+  var homeEl = document.getElementById('filter-home');
+  var awayEl = document.getElementById('filter-away');
+  var home = (homeEl ? homeEl.value : '').trim();
+  var away = (awayEl ? awayEl.value : '').trim();
+  var tbody = document.querySelector('.events-table tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  eventsData.forEach(function (e, idx) {
+    if (!rows[idx]) return;
+    var leagueOk = !e.league_key || activeLeagues.has(e.league_key);
+    var homeOk = fuzzyMatch(home, e.home_team);
+    var awayOk = fuzzyMatch(away, e.away_team);
+    rows[idx].style.display = (leagueOk && homeOk && awayOk) ? '' : 'none';
+  });
 }
 
 function renderEvents(events) {
@@ -167,38 +189,29 @@ function renderEvents(events) {
 
   container.innerHTML = '';
 
-  // Custom match form
-  const customForm = document.createElement('div');
-  customForm.className = 'card';
-  customForm.style.marginBottom = '16px';
-  customForm.innerHTML =
-    '<div class="section-title" style="margin-bottom: 12px">Custom Match</div>' +
+  // Team search filter
+  const filterForm = document.createElement('div');
+  filterForm.className = 'card';
+  filterForm.style.marginBottom = '16px';
+  filterForm.innerHTML =
+    '<div class="section-title" style="margin-bottom: 12px">Search</div>' +
     '<div style="display: flex; gap: 10px; align-items: end; flex-wrap: wrap">' +
     '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Home Team</label>' +
-    '  <input type="text" id="custom-home" class="market-select" style="width: 180px" placeholder="e.g. Arsenal"></div>' +
+    '  <input type="text" id="filter-home" class="market-select" style="width: 180px" placeholder="e.g. Arsenal"></div>' +
     '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Away Team</label>' +
-    '  <input type="text" id="custom-away" class="market-select" style="width: 180px" placeholder="e.g. Chelsea"></div>' +
-    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Date</label>' +
-    '  <input type="date" id="custom-date" class="market-select" style="width: 150px"></div>' +
-    '  <button class="btn btn-primary btn-sm" id="custom-go">View Match</button>' +
+    '  <input type="text" id="filter-away" class="market-select" style="width: 180px" placeholder="e.g. Chelsea"></div>' +
     '</div>';
-  container.appendChild(customForm);
+  container.appendChild(filterForm);
 
-  document.getElementById('custom-date').value = new Date().toISOString().slice(0, 10);
-  document.getElementById('custom-go').addEventListener('click', () => {
-    const home = document.getElementById('custom-home').value.trim();
-    const away = document.getElementById('custom-away').value.trim();
-    const date = document.getElementById('custom-date').value.trim();
-    if (!home || !away || !date) { showToast('Fill in all fields', 'error'); return; }
-    openMatchPage({ home_team: home, away_team: away, commence_time: date + 'T00:00:00Z', league_key: '', league_label: 'Custom' });
-  });
+  document.getElementById('filter-home').addEventListener('input', applyAllFilters);
+  document.getElementById('filter-away').addEventListener('input', applyAllFilters);
 
   // Events table
   const table = document.createElement('table');
   table.className = 'events-table';
 
   const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Cached</th></tr>';
+  thead.innerHTML = '<tr><th>Date</th><th>Match</th><th>League</th><th>Analyzed by AI</th></tr>';
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
@@ -251,6 +264,9 @@ function renderEvents(events) {
 
   table.appendChild(tbody);
   container.appendChild(table);
+
+  // Apply active filters to newly rendered rows
+  applyAllFilters();
 
   // Fetch cache status for each event (batched, non-blocking)
   loadCacheStatuses(events);
