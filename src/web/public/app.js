@@ -453,11 +453,13 @@ function renderGroupedEvents(events) {
 
       // League cell
       var tdLeague = document.createElement('td');
-      var badge = document.createElement('span');
-      badge.className = 'league-badge';
-      badge.dataset.league = e.league_key;
-      badge.textContent = e.league_label;
-      tdLeague.appendChild(badge);
+      if (e.league_label) {
+        var badge = document.createElement('span');
+        badge.className = 'league-badge';
+        badge.dataset.league = e.league_key;
+        badge.textContent = e.league_label;
+        tdLeague.appendChild(badge);
+      }
       tr.appendChild(tdLeague);
 
       // Analyzed status cell — use inline markets data from history
