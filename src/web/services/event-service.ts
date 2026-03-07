@@ -82,6 +82,11 @@ async function fetchAllEvents(): Promise<EventWithLeague[]> {
       new Date(b.commence_time).getTime()
   );
 
+  // Log quota once per fetch cycle
+  if (client.lastQuota) {
+    console.log(`[odds-api] fetched ${allEvents.length} events across ${SUPPORTED_LEAGUES.length} leagues — ${client.lastQuota.remaining} requests remaining (${client.lastQuota.used} used)`);
+  }
+
   cachedEvents = allEvents;
   cachedAt = Date.now();
 

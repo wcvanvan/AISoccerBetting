@@ -70,12 +70,30 @@ async function loadEvents() {
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading matches...</div>';
 
   try {
+    const resp = await fetch('/api/events');
+    const data = await resp.json();
+
+    if (data.error) {
+      await loadEventsFromHistory(container);
+      return;
+    }
+
+    eventsData = data.events || [];
+    renderLeagueFilters(data.leagues || []);
+    renderEvents(eventsData);
+  } catch (err) {
+    await loadEventsFromHistory(container);
+  }
+}
+
+async function loadEventsFromHistory(container) {
+  try {
     const resp = await fetch('/api/history');
     const data = await resp.json();
     const matches = data.matches || [];
 
     if (matches.length === 0) {
-      container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>No reports available yet.</p></div>';
+      container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>No event data or cached reports available.</p></div>';
       return;
     }
 
@@ -91,6 +109,11 @@ async function loadEvents() {
 
     document.getElementById('league-filters').innerHTML = '';
     renderEvents(eventsData);
+
+    var heading = document.querySelector('#page-matches .section-title');
+    if (heading) {
+      heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ' from reports)</span>';
+    }
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><h3>Failed to load</h3><p>' + esc(err.message) + '</p></div>';
   }

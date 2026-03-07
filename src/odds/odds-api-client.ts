@@ -12,6 +12,8 @@ const FETCH_TIMEOUT_MS = 15_000;
 
 export class OddsApiClient {
   private apiKey: string;
+  /** Latest quota info from API response headers. */
+  lastQuota: { remaining: number; used: number } | null = null;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -47,11 +49,11 @@ export class OddsApiClient {
 
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 
-    // Log remaining API quota (debug level — only visible with DEBUG=odds-api)
+    // Track API quota from response headers
     const remaining = res.headers.get('x-requests-remaining');
     const used = res.headers.get('x-requests-used');
-    if (remaining != null && process.env.DEBUG?.includes('odds-api')) {
-      console.error(`  [odds-api] ${remaining} requests remaining (${used ?? '?'} used)`);
+    if (remaining != null) {
+      this.lastQuota = { remaining: Number(remaining), used: Number(used ?? 0) };
     }
 
     if (!res.ok) {
