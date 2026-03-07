@@ -74,7 +74,7 @@ async function loadEvents() {
     const data = await resp.json();
 
     if (data.error) {
-      container.innerHTML = '<div class="empty-state"><h3>Error</h3><p>' + esc(data.error) + '</p></div>';
+      await loadEventsFromHistory(container);
       return;
     }
 
@@ -82,6 +82,39 @@ async function loadEvents() {
     renderLeagueFilters(data.leagues || []);
     const filtered = eventsData.filter((e) => activeLeagues.has(e.league_key));
     renderEvents(filtered);
+  } catch (err) {
+    await loadEventsFromHistory(container);
+  }
+}
+
+async function loadEventsFromHistory(container) {
+  try {
+    const resp = await fetch('/api/history');
+    const data = await resp.json();
+    const matches = data.matches || [];
+
+    if (matches.length === 0) {
+      container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>No event data or cached reports available.</p></div>';
+      return;
+    }
+
+    eventsData = matches.map(function (m) {
+      return {
+        home_team: m.homeTeam,
+        away_team: m.awayTeam,
+        commence_time: m.date + 'T00:00:00Z',
+        league_key: '',
+        league_label: '',
+      };
+    });
+
+    document.getElementById('league-filters').innerHTML = '';
+    renderEvents(eventsData);
+
+    var heading = document.querySelector('#page-matches .section-title');
+    if (heading) {
+      heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ' from reports)</span>';
+    }
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><h3>Failed to load</h3><p>' + esc(err.message) + '</p></div>';
   }
