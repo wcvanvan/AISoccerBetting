@@ -196,6 +196,8 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
         date: string;
         homeTeam: string;
         awayTeam: string;
+        leagueKey: string;
+        leagueLabel: string;
         markets: Record<string, { hasReport: boolean; hasAnalysis: boolean }>;
         mtime: number;
       }
@@ -229,7 +231,19 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
         if (parsed) { homeTeam = parsed.home; awayTeam = parsed.away; }
       }
 
-      const match = { date, homeTeam, awayTeam, markets: {} as Record<string, { hasReport: boolean; hasAnalysis: boolean }>, mtime: 0 };
+      // Read league info from meta.json if present
+      let leagueKey = '';
+      let leagueLabel = '';
+      const metaPath = path.join(dirPath, 'meta.json');
+      if (fs.existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          leagueKey = meta.leagueKey || '';
+          leagueLabel = meta.leagueLabel || '';
+        } catch {}
+      }
+
+      const match = { date, homeTeam, awayTeam, leagueKey, leagueLabel, markets: {} as Record<string, { hasReport: boolean; hasAnalysis: boolean }>, mtime: 0 };
 
       for (const file of files) {
         const fm = file.match(filePattern);
@@ -273,7 +287,7 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const match = matchMap.get(matchKey) || {
-        date, homeTeam, awayTeam,
+        date, homeTeam, awayTeam, leagueKey: '', leagueLabel: '',
         markets: {} as Record<string, { hasReport: boolean; hasAnalysis: boolean }>,
         mtime: 0,
       };
@@ -289,8 +303,8 @@ export async function reportsRoutes(app: FastifyInstance): Promise<void> {
 
     const matches = Array.from(matchMap.values())
       .sort((a, b) => b.mtime - a.mtime)
-      .map(({ homeTeam, awayTeam, date, markets, mtime }) => ({
-        homeTeam, awayTeam, date, markets, lastModified: mtime,
+      .map(({ homeTeam, awayTeam, date, leagueKey, leagueLabel, markets, mtime }) => ({
+        homeTeam, awayTeam, date, leagueKey, leagueLabel, markets, lastModified: mtime,
       }));
 
     return { matches };

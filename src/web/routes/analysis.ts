@@ -29,12 +29,16 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       market?: string;
       analyze?: boolean;
       force?: boolean;
+      leagueKey?: string;
+      leagueLabel?: string;
     };
 
     const homeTeam = body.homeTeam?.trim();
     const awayTeam = body.awayTeam?.trim();
     const date = body.date?.trim();
     const market = body.market?.trim() as MarketType | undefined;
+    const leagueKey = body.leagueKey?.trim() || '';
+    const leagueLabel = body.leagueLabel?.trim() || '';
 
     if (!homeTeam || !awayTeam || !date || !market) {
       reply.status(400);
@@ -69,7 +73,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
             return { jobId: existing.id, status: existing.status, duplicate: true };
           }
 
-          const job = jobManager.create(homeTeam, awayTeam, date, market);
+          const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel);
           job.reportPath = cached.reportPath;
           job.logs.push({ time: Date.now(), message: 'Using cached data report, skipping collection' });
 
@@ -78,7 +82,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
         }
 
         // Fully cached (report + optional analysis) → return immediately
-        const job = jobManager.create(homeTeam, awayTeam, date, market);
+        const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel);
         job.reportPath = cached.reportPath;
         job.analysisPath = cached.analysisPath;
         job.status = 'complete';
@@ -106,7 +110,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const analyze = body.analyze !== false;
-    const job = jobManager.create(homeTeam, awayTeam, date, market);
+    const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel);
 
     // Start pipeline in background (don't await — errors tracked in the job)
     runPipelineForJob(job, analyze).catch(() => {});

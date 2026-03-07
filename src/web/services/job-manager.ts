@@ -23,6 +23,8 @@ export interface Job {
   awayTeam: string;
   date: string;
   market: MarketType;
+  leagueKey: string;
+  leagueLabel: string;
   status: JobStatus;
   reportPath: string | null;
   analysisPath: string | null;
@@ -44,7 +46,9 @@ class JobManagerImpl {
     homeTeam: string,
     awayTeam: string,
     date: string,
-    market: MarketType
+    market: MarketType,
+    leagueKey = '',
+    leagueLabel = ''
   ): Job {
     const id = crypto.randomUUID();
     const now = Date.now();
@@ -54,6 +58,8 @@ class JobManagerImpl {
       awayTeam,
       date,
       market,
+      leagueKey,
+      leagueLabel,
       status: 'pending',
       reportPath: null,
       analysisPath: null,

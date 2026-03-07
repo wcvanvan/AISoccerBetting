@@ -979,6 +979,35 @@ input[type="text"].market-select::placeholder {
   margin-top: 16px;
 }
 
+/* ── Date-grouped match list ────────────────────────────────────────────── */
+.date-group {
+  margin-bottom: 4px;
+}
+
+.date-group-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 10px 12px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 0;
+}
+
+.date-group-header.date-group-today {
+  color: var(--accent);
+  border-bottom-color: rgba(59, 130, 246, 0.25);
+}
+
+.grouped-table {
+  margin-bottom: 0;
+}
+
+.grouped-table thead th {
+  border-radius: 0;
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (min-width: 1400px) {
   .container { max-width: 1400px; }

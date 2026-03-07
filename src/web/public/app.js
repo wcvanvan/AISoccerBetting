@@ -35,6 +35,12 @@ async function loadUser() {
       const badge = document.getElementById('user-badge');
       badge.textContent = currentUser.username;
       badge.className = 'user-badge role-' + currentUser.role;
+
+      // Hide History nav for reader accounts
+      if (currentUser.role === 'reader') {
+        const historyNav = document.getElementById('nav-history');
+        if (historyNav) historyNav.style.display = 'none';
+      }
     }
   } catch (_) {
     // If not authenticated, server redirects to login
@@ -69,6 +75,12 @@ async function loadEvents() {
   const container = document.getElementById('events-container');
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading matches...</div>';
 
+  // Reader accounts: load all matches from history (reports), grouped by date
+  if (currentUser && currentUser.role === 'reader') {
+    await loadReaderMatches(container);
+    return;
+  }
+
   try {
     const resp = await fetch('/api/events');
     const data = await resp.json();
@@ -83,6 +95,56 @@ async function loadEvents() {
     renderEvents(eventsData);
   } catch (err) {
     await loadEventsFromHistory(container);
+  }
+}
+
+async function loadReaderMatches(container) {
+  try {
+    const resp = await fetch('/api/history');
+    const data = await resp.json();
+    const matches = data.matches || [];
+
+    if (matches.length === 0) {
+      container.innerHTML = '<div class="empty-state"><h3>No matches available</h3><p>No analyzed matches yet.</p></div>';
+      return;
+    }
+
+    eventsData = matches.map(function (m) {
+      return {
+        home_team: m.homeTeam,
+        away_team: m.awayTeam,
+        commence_time: m.date + 'T00:00:00Z',
+        league_key: m.leagueKey || '',
+        league_label: m.leagueLabel || '',
+        markets: m.markets || {},
+      };
+    });
+
+    // Build league filters from discovered leagues
+    var leagueMap = {};
+    eventsData.forEach(function (e) {
+      if (e.league_key && e.league_label) {
+        leagueMap[e.league_key] = e.league_label;
+      }
+    });
+    var leagues = Object.keys(leagueMap).map(function (k) {
+      return { key: k, label: leagueMap[k] };
+    });
+    if (leagues.length > 0) {
+      leagues.forEach(function (l) { activeLeagues.add(l.key); });
+      renderLeagueFilters(leagues);
+    } else {
+      document.getElementById('league-filters').innerHTML = '';
+    }
+
+    var heading = document.querySelector('#page-matches .section-title');
+    if (heading) {
+      heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ')</span>';
+    }
+
+    renderGroupedEvents(eventsData);
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state"><h3>Failed to load</h3><p>' + esc(err.message) + '</p></div>';
   }
 }
 
@@ -102,12 +164,29 @@ async function loadEventsFromHistory(container) {
         home_team: m.homeTeam,
         away_team: m.awayTeam,
         commence_time: m.date + 'T00:00:00Z',
-        league_key: '',
-        league_label: '',
+        league_key: m.leagueKey || '',
+        league_label: m.leagueLabel || '',
       };
     });
 
-    document.getElementById('league-filters').innerHTML = '';
+    // Build league filters from discovered leagues
+    var leagueMap = {};
+    eventsData.forEach(function (e) {
+      if (e.league_key && e.league_label) {
+        leagueMap[e.league_key] = e.league_label;
+      }
+    });
+    var leagues = Object.keys(leagueMap).map(function (k) {
+      return { key: k, label: leagueMap[k] };
+    });
+    if (leagues.length > 0) {
+      // Ensure discovered leagues are active by default
+      leagues.forEach(function (l) { activeLeagues.add(l.key); });
+      renderLeagueFilters(leagues);
+    } else {
+      document.getElementById('league-filters').innerHTML = '';
+    }
+
     renderEvents(eventsData);
 
     var heading = document.querySelector('#page-matches .section-title');
@@ -145,7 +224,12 @@ function toggleLeague(key) {
   document.querySelectorAll('.filter-chip').forEach((chip) => {
     chip.classList.toggle('active', activeLeagues.has(chip.dataset.league));
   });
-  applyAllFilters();
+  // Use correct filter function depending on which view is active
+  if (document.querySelector('.date-group')) {
+    applyGroupedFilters();
+  } else {
+    applyAllFilters();
+  }
 }
 
 function fuzzyMatch(query, text) {
@@ -270,6 +354,199 @@ function renderEvents(events) {
 
   // Fetch cache status for each event (batched, non-blocking)
   loadCacheStatuses(events);
+}
+
+function renderGroupedEvents(events) {
+  var container = document.getElementById('events-container');
+
+  if (events.length === 0) {
+    container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>Try enabling more leagues.</p></div>';
+    return;
+  }
+
+  container.innerHTML = '';
+
+  // Team search filter
+  var filterForm = document.createElement('div');
+  filterForm.className = 'card';
+  filterForm.style.marginBottom = '16px';
+  filterForm.innerHTML =
+    '<div class="section-title" style="margin-bottom: 12px">Search</div>' +
+    '<div style="display: flex; gap: 10px; align-items: end; flex-wrap: wrap">' +
+    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Home Team</label>' +
+    '  <input type="text" id="filter-home" class="market-select" style="width: 180px" placeholder="e.g. Arsenal"></div>' +
+    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Away Team</label>' +
+    '  <input type="text" id="filter-away" class="market-select" style="width: 180px" placeholder="e.g. Chelsea"></div>' +
+    '</div>';
+  container.appendChild(filterForm);
+
+  document.getElementById('filter-home').addEventListener('input', applyGroupedFilters);
+  document.getElementById('filter-away').addEventListener('input', applyGroupedFilters);
+
+  // Sort events by date ascending (oldest first)
+  var sorted = events.slice().sort(function (a, b) {
+    return a.commence_time.localeCompare(b.commence_time);
+  });
+
+  // Group by date
+  var groups = [];
+  var groupMap = {};
+  sorted.forEach(function (e) {
+    var dateKey = e.commence_time.slice(0, 10);
+    if (!groupMap[dateKey]) {
+      groupMap[dateKey] = { date: dateKey, events: [] };
+      groups.push(groupMap[dateKey]);
+    }
+    groupMap[dateKey].events.push(e);
+  });
+
+  var todayStr = new Date().toISOString().slice(0, 10);
+  var todayEl = null;
+
+  // Render each date group
+  groups.forEach(function (group) {
+    var section = document.createElement('div');
+    section.className = 'date-group';
+    section.dataset.date = group.date;
+
+    // Date separator header
+    var header = document.createElement('div');
+    header.className = 'date-group-header';
+    var d = new Date(group.date + 'T12:00:00Z');
+    var label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    if (group.date === todayStr) {
+      label += ' — Today';
+      header.classList.add('date-group-today');
+      todayEl = section;
+    }
+    header.textContent = label;
+    section.appendChild(header);
+
+    // Table for this group
+    var table = document.createElement('table');
+    table.className = 'events-table grouped-table';
+
+    var thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>Match</th><th>League</th><th>Analyzed by AI</th></tr>';
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    group.events.forEach(function (e) {
+      var tr = document.createElement('tr');
+      tr.className = 'grouped-row';
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', function () { openMatchPage(e); });
+
+      // Match cell
+      var tdMatch = document.createElement('td');
+      var homeSpan = document.createElement('span');
+      homeSpan.className = 'team-name';
+      homeSpan.textContent = e.home_team;
+      var vsSpan = document.createElement('span');
+      vsSpan.className = 'vs';
+      vsSpan.textContent = 'vs';
+      var awaySpan = document.createElement('span');
+      awaySpan.className = 'team-name';
+      awaySpan.textContent = e.away_team;
+      tdMatch.append(homeSpan, vsSpan, awaySpan);
+      tr.appendChild(tdMatch);
+
+      // League cell
+      var tdLeague = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'league-badge';
+      badge.dataset.league = e.league_key;
+      badge.textContent = e.league_label;
+      tdLeague.appendChild(badge);
+      tr.appendChild(tdLeague);
+
+      // Analyzed status cell — use inline markets data from history
+      var tdCache = document.createElement('td');
+      tdCache.className = 'cache-cell';
+      if (e.markets && Object.keys(e.markets).length > 0) {
+        renderInlineMarketBadges(tdCache, e.markets);
+      } else {
+        tdCache.innerHTML = '<span class="cache-none">&mdash;</span>';
+      }
+      tr.appendChild(tdCache);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    section.appendChild(table);
+    container.appendChild(section);
+  });
+
+  applyGroupedFilters();
+
+  // Scroll to today's matches (or nearest future date)
+  var scrollTarget = todayEl;
+  if (!scrollTarget) {
+    // Find first future date group
+    var futureGroups = document.querySelectorAll('.date-group');
+    for (var i = 0; i < futureGroups.length; i++) {
+      if (futureGroups[i].dataset.date >= todayStr) {
+        scrollTarget = futureGroups[i];
+        break;
+      }
+    }
+  }
+  if (scrollTarget) {
+    setTimeout(function () {
+      var headerHeight = 52;
+      var y = scrollTarget.getBoundingClientRect().top + window.scrollY - headerHeight - 10;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }, 100);
+  }
+}
+
+function renderInlineMarketBadges(cell, markets) {
+  var marketNames = ['goals', 'corners', 'cards'];
+  var hasSome = false;
+  marketNames.forEach(function (m) {
+    var info = markets[m];
+    if (info && (info.hasReport || info.hasAnalysis)) {
+      hasSome = true;
+      var badge = document.createElement('span');
+      badge.className = 'cache-badge' + (info.hasAnalysis ? ' cache-full' : ' cache-partial');
+      badge.title = m + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
+      badge.textContent = m.charAt(0).toUpperCase() + m.slice(1);
+      cell.appendChild(badge);
+    }
+  });
+  if (!hasSome) {
+    cell.innerHTML = '<span class="cache-none">&mdash;</span>';
+  }
+}
+
+function applyGroupedFilters() {
+  var homeEl = document.getElementById('filter-home');
+  var awayEl = document.getElementById('filter-away');
+  var home = (homeEl ? homeEl.value : '').trim();
+  var away = (awayEl ? awayEl.value : '').trim();
+
+  var groups = document.querySelectorAll('.date-group');
+  groups.forEach(function (group) {
+    var rows = group.querySelectorAll('.grouped-row');
+    var anyVisible = false;
+
+    rows.forEach(function (row) {
+      var homeTeam = row.querySelectorAll('.team-name')[0]?.textContent || '';
+      var awayTeam = row.querySelectorAll('.team-name')[1]?.textContent || '';
+      var leagueKey = row.querySelector('.league-badge')?.dataset?.league || '';
+
+      var leagueOk = !leagueKey || activeLeagues.has(leagueKey);
+      var homeOk = fuzzyMatch(home, homeTeam);
+      var awayOk = fuzzyMatch(away, awayTeam);
+      var visible = leagueOk && homeOk && awayOk;
+      row.style.display = visible ? '' : 'none';
+      if (visible) anyVisible = true;
+    });
+
+    // Hide entire date group if no matches visible
+    group.style.display = anyVisible ? '' : 'none';
+  });
 }
 
 async function loadCacheStatuses(events) {
@@ -592,7 +869,11 @@ async function startJob(homeTeam, awayTeam, date, market, analyze) {
     const resp = await fetch('/api/analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeTeam, awayTeam, date, market, analyze }),
+      body: JSON.stringify({
+        homeTeam, awayTeam, date, market, analyze,
+        leagueKey: currentMatch ? currentMatch.league_key : '',
+        leagueLabel: currentMatch ? currentMatch.league_label : '',
+      }),
     });
     const data = await resp.json();
 
@@ -926,8 +1207,8 @@ function renderHistoryCard(match) {
       home_team: match.homeTeam,
       away_team: match.awayTeam,
       commence_time: match.date + 'T00:00:00Z',
-      league_key: '',
-      league_label: '',
+      league_key: match.leagueKey || '',
+      league_label: match.leagueLabel || '',
     });
   });
 

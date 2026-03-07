@@ -68,6 +68,9 @@ export async function runPipelineForJob(
     // Skip collection if report already cached (e.g. from a previous collect-only run)
     if (!job.reportPath) {
       await collectData(job);
+    } else if (job.leagueKey || job.leagueLabel) {
+      // Persist league info even when collection was skipped (analysis-only re-run)
+      writeMetaJson(path.dirname(job.reportPath), job);
     }
 
     if (analyze && job.reportPath) {
@@ -120,6 +123,10 @@ async function collectData(job: Job): Promise<void> {
     fs.writeFileSync(reportPath, markdown, 'utf8');
 
     job.reportPath = reportPath;
+
+    // Write meta.json with league info for history filtering
+    writeMetaJson(reportDir, job);
+
     jobManager.updateStatus(
       job.id,
       'collected',
@@ -128,6 +135,20 @@ async function collectData(job: Job): Promise<void> {
   } finally {
     provider.dispose();
   }
+}
+
+/** Persist league metadata to meta.json in the report directory. */
+function writeMetaJson(reportDir: string, job: Job): void {
+  if (!job.leagueKey && !job.leagueLabel) return;
+  const metaPath = path.join(reportDir, 'meta.json');
+  // Read existing meta first, then overlay new league values
+  let meta: Record<string, string> = {};
+  if (fs.existsSync(metaPath)) {
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch {}
+  }
+  if (job.leagueKey) meta.leagueKey = job.leagueKey;
+  if (job.leagueLabel) meta.leagueLabel = job.leagueLabel;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8');
 }
 
 async function runAnalysis(job: Job): Promise<void> {
