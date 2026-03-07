@@ -27,9 +27,11 @@
     <div class="container">
       <!-- Matches Page -->
       <div id="page-matches" class="page active">
-        <h2 class="section-title">Upcoming Matches</h2>
-
-        <div class="filters" id="league-filters"></div>
+        <div id="date-nav" class="date-nav" style="display:none">
+          <button class="date-nav-arrow" id="date-prev">&larr;</button>
+          <div class="date-pills" id="date-pills"></div>
+          <button class="date-nav-arrow" id="date-next">&rarr;</button>
+        </div>
 
         <div id="events-container">
           <div class="loading">

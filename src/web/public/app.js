@@ -3,14 +3,6 @@
  */
 
 // State
-let activeLeagues = new Set([
-  'soccer_epl',
-  'soccer_fa_cup',
-  'soccer_uefa_champs_league',
-  'soccer_germany_bundesliga',
-  'soccer_spain_la_liga',
-  'soccer_france_ligue_one',
-]);
 let eventsData = [];
 let currentUser = null; // { username, role }
 let currentMatch = null; // { home_team, away_team, date, league_key, league_label, commence_time }
@@ -71,29 +63,27 @@ function showPage(page) {
 
 // ── Events / Matches ────────────────────────────────────────────────────────
 
+var datePages = [];   // [{ date: 'YYYY-MM-DD', events: [...] }, ...]
+var currentDateIdx = 0;
+
 async function loadEvents() {
   var container = document.getElementById('events-container');
   container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading matches...</div>';
 
   var oddsEvents = [];
   var historyEvents = [];
-  var leagues = [];
 
-  // Fetch Odds API events
-  try {
-    var resp = await fetch('/api/events');
-    var data = await resp.json();
-    if (!data.error) {
-      oddsEvents = data.events || [];
-      leagues = data.leagues || [];
-    }
-  } catch (_) {}
+  // Fetch Odds API events + history in parallel
+  var results = await Promise.allSettled([
+    fetch('/api/events').then(function (r) { return r.json(); }),
+    fetch('/api/history').then(function (r) { return r.json(); }),
+  ]);
 
-  // Fetch history (reports on disk)
-  try {
-    var resp2 = await fetch('/api/history');
-    var data2 = await resp2.json();
-    var matches = data2.matches || [];
+  if (results[0].status === 'fulfilled' && !results[0].value.error) {
+    oddsEvents = results[0].value.events || [];
+  }
+  if (results[1].status === 'fulfilled') {
+    var matches = results[1].value.matches || [];
     historyEvents = matches.map(function (m) {
       return {
         home_team: m.homeTeam,
@@ -104,7 +94,7 @@ async function loadEvents() {
         markets: m.markets || {},
       };
     });
-  } catch (_) {}
+  }
 
   // Merge: start with odds events, add history-only matches
   var seen = new Set();
@@ -118,7 +108,6 @@ async function loadEvents() {
       seen.add(key);
       merged.push(e);
     } else {
-      // Enrich odds event with markets data from history
       var existing = merged.find(function (m) {
         return m.home_team === e.home_team && m.away_team === e.away_team &&
           m.commence_time.slice(0, 10) === e.commence_time.slice(0, 10);
@@ -134,253 +123,187 @@ async function loadEvents() {
 
   eventsData = merged;
 
-  // Build league filters
-  var leagueMap = {};
-  if (leagues.length > 0) {
-    leagues.forEach(function (l) { leagueMap[l.key] = l.label; });
-  }
-  eventsData.forEach(function (e) {
-    if (e.league_key && e.league_label) leagueMap[e.league_key] = e.league_label;
+  // Sort by date ascending, then group into date pages
+  var sorted = merged.slice().sort(function (a, b) {
+    return a.commence_time.localeCompare(b.commence_time);
   });
-  var leagueList = Object.keys(leagueMap).map(function (k) {
-    return { key: k, label: leagueMap[k] };
-  });
-  if (leagueList.length > 0) {
-    leagueList.forEach(function (l) { activeLeagues.add(l.key); });
-    renderLeagueFilters(leagueList);
-  } else {
-    document.getElementById('league-filters').innerHTML = '';
-  }
-
-  var heading = document.querySelector('#page-matches .section-title');
-  if (heading) {
-    heading.innerHTML = 'Matches <span class="match-count">(' + eventsData.length + ')</span>';
-  }
-
-  renderEvents(eventsData);
-}
-
-function renderLeagueFilters(leagues) {
-  const container = document.getElementById('league-filters');
-  container.innerHTML = '';
-  leagues.forEach((l) => {
-    const label = document.createElement('label');
-    label.className = 'filter-chip' + (activeLeagues.has(l.key) ? ' active' : '');
-    label.dataset.league = l.key;
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.checked = activeLeagues.has(l.key);
-    input.addEventListener('change', () => toggleLeague(l.key));
-    label.appendChild(input);
-    label.appendChild(document.createTextNode(' ' + l.label));
-    container.appendChild(label);
-  });
-}
-
-function toggleLeague(key) {
-  if (activeLeagues.has(key)) {
-    activeLeagues.delete(key);
-  } else {
-    activeLeagues.add(key);
-  }
-  document.querySelectorAll('.filter-chip').forEach(function (chip) {
-    chip.classList.toggle('active', activeLeagues.has(chip.dataset.league));
-  });
-  applyFilters();
-}
-
-function fuzzyMatch(query, text) {
-  if (!query) return true;
-  var lowerText = text.toLowerCase();
-  var words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return words.every(function (w) { return lowerText.indexOf(w) !== -1; });
-}
-
-function applyFilters() {
-  var homeEl = document.getElementById('filter-home');
-  var awayEl = document.getElementById('filter-away');
-  var home = (homeEl ? homeEl.value : '').trim();
-  var away = (awayEl ? awayEl.value : '').trim();
-  var tbody = document.querySelector('.events-table tbody');
-  if (!tbody) return;
-
-  var rows = tbody.querySelectorAll('tr');
-  // Track which date separator rows should be visible
-  var currentDateRow = null;
-  var anyVisibleInGroup = false;
-
-  rows.forEach(function (row) {
-    if (row.classList.contains('date-separator-row')) {
-      // Before moving to next group, update previous date row visibility
-      if (currentDateRow) currentDateRow.style.display = anyVisibleInGroup ? '' : 'none';
-      currentDateRow = row;
-      anyVisibleInGroup = false;
-      return;
+  var groupMap = {};
+  datePages = [];
+  sorted.forEach(function (e) {
+    var dateKey = e.commence_time.slice(0, 10);
+    if (!groupMap[dateKey]) {
+      groupMap[dateKey] = { date: dateKey, events: [] };
+      datePages.push(groupMap[dateKey]);
     }
-    var homeTeam = row.querySelectorAll('.team-name')[0]?.textContent || '';
-    var awayTeam = row.querySelectorAll('.team-name')[1]?.textContent || '';
-    var leagueKey = row.querySelector('.league-badge')?.dataset?.league || '';
-
-    var leagueOk = !leagueKey || activeLeagues.has(leagueKey);
-    var homeOk = fuzzyMatch(home, homeTeam);
-    var awayOk = fuzzyMatch(away, awayTeam);
-    var visible = leagueOk && homeOk && awayOk;
-    row.style.display = visible ? '' : 'none';
-    if (visible) anyVisibleInGroup = true;
+    groupMap[dateKey].events.push(e);
   });
-  // Handle last group
-  if (currentDateRow) currentDateRow.style.display = anyVisibleInGroup ? '' : 'none';
+
+  // Find today's page (or nearest future)
+  var todayStr = new Date().toISOString().slice(0, 10);
+  currentDateIdx = 0;
+  for (var i = 0; i < datePages.length; i++) {
+    if (datePages[i].date >= todayStr) {
+      currentDateIdx = i;
+      break;
+    }
+    // If all dates are past, land on the last one
+    currentDateIdx = i;
+  }
+
+  document.getElementById('date-nav').style.display = '';
+  renderDatePills();
+  renderDatePage();
 }
 
-function renderEvents(events) {
-  var container = document.getElementById('events-container');
+function renderDatePills() {
+  var container = document.getElementById('date-pills');
+  container.innerHTML = '';
+  var todayStr = new Date().toISOString().slice(0, 10);
 
-  if (events.length === 0) {
-    container.innerHTML = '<div class="empty-state"><h3>No matches found</h3><p>Try enabling more leagues.</p></div>';
+  datePages.forEach(function (page, idx) {
+    var pill = document.createElement('button');
+    pill.className = 'date-pill' + (idx === currentDateIdx ? ' active' : '');
+    var d = new Date(page.date + 'T12:00:00Z');
+    var dayName = d.toLocaleDateString('en-GB', { weekday: 'short' });
+    var dayNum = d.getUTCDate();
+    pill.innerHTML = '<span class="date-pill-day">' + dayName + '</span>' +
+      '<span class="date-pill-num">' + dayNum + '</span>';
+    if (page.date === todayStr) pill.classList.add('today');
+    pill.addEventListener('click', function () { goToDate(idx); });
+    container.appendChild(pill);
+  });
+
+  // Update arrow states
+  document.getElementById('date-prev').disabled = currentDateIdx === 0;
+  document.getElementById('date-next').disabled = currentDateIdx === datePages.length - 1;
+
+  // Scroll active pill into view
+  var activePill = container.querySelector('.date-pill.active');
+  if (activePill) {
+    activePill.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function flipDate(dir) {
+  var next = currentDateIdx + dir;
+  if (next < 0 || next >= datePages.length) return;
+  goToDate(next);
+}
+
+function goToDate(idx) {
+  currentDateIdx = idx;
+  renderDatePills();
+  renderDatePage();
+}
+
+function renderDatePage() {
+  var container = document.getElementById('events-container');
+  var page = datePages[currentDateIdx];
+  if (!page) {
+    container.innerHTML = '<div class="empty-state"><h3>No matches</h3></div>';
     return;
   }
 
   container.innerHTML = '';
 
-  // Team search filter
-  var filterForm = document.createElement('div');
-  filterForm.className = 'card';
-  filterForm.style.marginBottom = '16px';
-  filterForm.innerHTML =
-    '<div class="section-title" style="margin-bottom: 12px">Search</div>' +
-    '<div style="display: flex; gap: 10px; align-items: end; flex-wrap: wrap">' +
-    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Home Team</label>' +
-    '  <input type="text" id="filter-home" class="market-select" style="width: 180px" placeholder="e.g. Arsenal"></div>' +
-    '  <div><label style="font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px">Away Team</label>' +
-    '  <input type="text" id="filter-away" class="market-select" style="width: 180px" placeholder="e.g. Chelsea"></div>' +
-    '</div>';
-  container.appendChild(filterForm);
-
-  document.getElementById('filter-home').addEventListener('input', applyFilters);
-  document.getElementById('filter-away').addEventListener('input', applyFilters);
-
-  // Sort events by date ascending (oldest first)
-  var sorted = events.slice().sort(function (a, b) {
-    return a.commence_time.localeCompare(b.commence_time);
-  });
-
-  // Group by date
-  var groups = [];
-  var groupMap = {};
-  sorted.forEach(function (e) {
-    var dateKey = e.commence_time.slice(0, 10);
-    if (!groupMap[dateKey]) {
-      groupMap[dateKey] = { date: dateKey, events: [] };
-      groups.push(groupMap[dateKey]);
-    }
-    groupMap[dateKey].events.push(e);
-  });
-
+  // Date heading
   var todayStr = new Date().toISOString().slice(0, 10);
-  var todayDateRow = null;
+  var d = new Date(page.date + 'T12:00:00Z');
+  var heading = document.createElement('div');
+  heading.className = 'date-page-heading';
+  var label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  if (page.date === todayStr) label += ' — Today';
+  heading.innerHTML = '<span class="date-page-label">' + esc(label) + '</span>' +
+    '<span class="date-page-count">' + page.events.length + ' match' + (page.events.length !== 1 ? 'es' : '') + '</span>';
+  container.appendChild(heading);
 
-  // Single table with one header
+  // Group events by league
+  var leagueGroups = [];
+  var leagueMap = {};
+  var noLeague = [];
+  page.events.forEach(function (e) {
+    if (e.league_key && e.league_label) {
+      if (!leagueMap[e.league_key]) {
+        leagueMap[e.league_key] = { key: e.league_key, label: e.league_label, events: [] };
+        leagueGroups.push(leagueMap[e.league_key]);
+      }
+      leagueMap[e.league_key].events.push(e);
+    } else {
+      noLeague.push(e);
+    }
+  });
+
+  // Render each league section
+  leagueGroups.forEach(function (lg) { renderLeagueSection(container, lg.key, lg.label, lg.events); });
+  if (noLeague.length > 0) renderLeagueSection(container, '', 'Other', noLeague);
+
+  // Fetch cache status for events without inline markets
+  loadCacheStatuses(page.events);
+}
+
+function renderLeagueSection(container, leagueKey, leagueLabel, events) {
+  var section = document.createElement('div');
+  section.className = 'league-section';
+
+  var header = document.createElement('div');
+  header.className = 'league-section-header';
+  var badge = document.createElement('span');
+  badge.className = 'league-badge league-badge-lg';
+  if (leagueKey) badge.dataset.league = leagueKey;
+  badge.textContent = leagueLabel;
+  header.appendChild(badge);
+  section.appendChild(header);
+
   var table = document.createElement('table');
   table.className = 'events-table';
-
-  var thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Match</th><th class="col-right">League</th><th class="col-right">Analyzed by AI</th></tr>';
-  table.appendChild(thead);
-
   var tbody = document.createElement('tbody');
 
-  groups.forEach(function (group) {
-    // Date separator row
-    var dateTr = document.createElement('tr');
-    dateTr.className = 'date-separator-row';
-    dateTr.dataset.date = group.date;
-    var dateTd = document.createElement('td');
-    dateTd.colSpan = 3;
-    dateTd.className = 'date-separator';
-    var d = new Date(group.date + 'T12:00:00Z');
-    var label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    if (group.date === todayStr) {
-      label += ' — Today';
-      dateTd.classList.add('date-separator-today');
-      todayDateRow = dateTr;
+  events.forEach(function (e) {
+    var tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', function () { openMatchPage(e); });
+
+    // Time cell
+    var tdTime = document.createElement('td');
+    tdTime.className = 'match-time-cell';
+    var dt = new Date(e.commence_time);
+    var hasTime = dt.getUTCHours() !== 0 || dt.getUTCMinutes() !== 0;
+    if (hasTime) {
+      tdTime.textContent = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     }
-    dateTd.textContent = label;
-    dateTr.appendChild(dateTd);
-    tbody.appendChild(dateTr);
+    tr.appendChild(tdTime);
 
-    // Match rows for this group
-    group.events.forEach(function (e) {
-      var tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
-      tr.addEventListener('click', function () { openMatchPage(e); });
+    // Match cell
+    var tdMatch = document.createElement('td');
+    var homeSpan = document.createElement('span');
+    homeSpan.className = 'team-name';
+    homeSpan.textContent = e.home_team;
+    var vsSpan = document.createElement('span');
+    vsSpan.className = 'vs';
+    vsSpan.textContent = 'vs';
+    var awaySpan = document.createElement('span');
+    awaySpan.className = 'team-name';
+    awaySpan.textContent = e.away_team;
+    tdMatch.append(homeSpan, vsSpan, awaySpan);
+    tr.appendChild(tdMatch);
 
-      // Match cell
-      var tdMatch = document.createElement('td');
-      var homeSpan = document.createElement('span');
-      homeSpan.className = 'team-name';
-      homeSpan.textContent = e.home_team;
-      var vsSpan = document.createElement('span');
-      vsSpan.className = 'vs';
-      vsSpan.textContent = 'vs';
-      var awaySpan = document.createElement('span');
-      awaySpan.className = 'team-name';
-      awaySpan.textContent = e.away_team;
-      tdMatch.append(homeSpan, vsSpan, awaySpan);
-      tr.appendChild(tdMatch);
+    // Analyzed status cell (right-aligned)
+    var tdCache = document.createElement('td');
+    tdCache.className = 'cache-cell col-right';
+    if (e.markets && Object.keys(e.markets).length > 0) {
+      renderInlineMarketBadges(tdCache, e.markets);
+    } else {
+      tdCache.id = 'cache-' + e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
+      tdCache.innerHTML = '<span class="cache-loading">...</span>';
+    }
+    tr.appendChild(tdCache);
 
-      // League cell (right-aligned)
-      var tdLeague = document.createElement('td');
-      tdLeague.className = 'col-right';
-      if (e.league_label) {
-        var badge = document.createElement('span');
-        badge.className = 'league-badge';
-        badge.dataset.league = e.league_key;
-        badge.textContent = e.league_label;
-        tdLeague.appendChild(badge);
-      }
-      tr.appendChild(tdLeague);
-
-      // Analyzed status cell (right-aligned)
-      var tdCache = document.createElement('td');
-      tdCache.className = 'cache-cell col-right';
-      if (e.markets && Object.keys(e.markets).length > 0) {
-        renderInlineMarketBadges(tdCache, e.markets);
-      } else {
-        tdCache.id = 'cache-' + e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
-        tdCache.innerHTML = '<span class="cache-loading">...</span>';
-      }
-      tr.appendChild(tdCache);
-
-      tbody.appendChild(tr);
-    });
+    tbody.appendChild(tr);
   });
 
   table.appendChild(tbody);
-  container.appendChild(table);
-
-  applyFilters();
-
-  // Fetch cache status for events without inline markets data
-  loadCacheStatuses(events);
-
-  // Scroll to today's matches (or nearest future date)
-  var scrollTarget = todayDateRow;
-  if (!scrollTarget) {
-    var dateRows = tbody.querySelectorAll('.date-separator-row');
-    for (var i = 0; i < dateRows.length; i++) {
-      if (dateRows[i].dataset.date >= todayStr) {
-        scrollTarget = dateRows[i];
-        break;
-      }
-    }
-  }
-  if (scrollTarget) {
-    setTimeout(function () {
-      var headerHeight = 52;
-      var y = scrollTarget.getBoundingClientRect().top + window.scrollY - headerHeight - 10;
-      window.scrollTo({ top: y, behavior: 'smooth' });
-    }, 100);
-  }
+  section.appendChild(table);
+  container.appendChild(section);
 }
 
 function renderInlineMarketBadges(cell, markets) {
@@ -406,7 +329,6 @@ async function loadCacheStatuses(events) {
   var seen = new Set();
   var tasks = [];
   events.forEach(function (e) {
-    // Skip events that already have inline markets data
     if (e.markets && Object.keys(e.markets).length > 0) return;
     var key = e.home_team + '|' + e.away_team + '|' + e.commence_time.slice(0, 10);
     if (seen.has(key)) return;
@@ -425,34 +347,16 @@ async function loadCacheStatuses(events) {
         });
         var resp = await fetch('/api/cache-status?' + params);
         var data = await resp.json();
-        renderCacheBadges(t.key, data.markets || {});
+        var cell = document.getElementById('cache-' + t.key);
+        if (cell) {
+          cell.innerHTML = '';
+          renderInlineMarketBadges(cell, data.markets || {});
+        }
       } catch (_) {
         var cell = document.getElementById('cache-' + t.key);
         if (cell) cell.innerHTML = '';
       }
     }));
-  }
-}
-
-function renderCacheBadges(key, markets) {
-  var cell = document.getElementById('cache-' + key);
-  if (!cell) return;
-  cell.innerHTML = '';
-  var marketNames = ['goals', 'corners', 'cards'];
-  var hasSome = false;
-  marketNames.forEach(function (m) {
-    var info = markets[m];
-    if (info && (info.hasReport || info.hasAnalysis)) {
-      hasSome = true;
-      var badge = document.createElement('span');
-      badge.className = 'cache-badge' + (info.hasAnalysis ? ' cache-full' : ' cache-partial');
-      badge.title = m + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
-      badge.textContent = m.charAt(0).toUpperCase() + m.slice(1);
-      cell.appendChild(badge);
-    }
-  });
-  if (!hasSome) {
-    cell.innerHTML = '<span class="cache-none">&mdash;</span>';
   }
 }
 
@@ -1177,6 +1081,10 @@ function showToast(message, type) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadUser();
+
+  document.getElementById('date-prev').addEventListener('click', function () { flipDate(-1); });
+  document.getElementById('date-next').addEventListener('click', function () { flipDate(1); });
+
   loadEvents();
 
   // Keyboard shortcuts
@@ -1186,6 +1094,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (matchPage && matchPage.classList.contains('active')) {
         showPage('matches');
       }
+    }
+    // Arrow keys for date flipping (only on matches page, not in inputs)
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const matchesPage = document.getElementById('page-matches');
+    if (matchesPage && matchesPage.classList.contains('active')) {
+      if (e.key === 'ArrowLeft') flipDate(-1);
+      if (e.key === 'ArrowRight') flipDate(1);
     }
   });
 });
