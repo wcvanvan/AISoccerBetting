@@ -315,7 +315,7 @@ function renderCacheBadges(idx, markets) {
       const badge = document.createElement('span');
       badge.className = 'cache-badge' + (info.hasAnalysis ? ' cache-full' : ' cache-partial');
       badge.title = m + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
-      badge.textContent = m.charAt(0).toUpperCase();
+      badge.textContent = m.charAt(0).toUpperCase() + m.slice(1);
       cell.appendChild(badge);
     }
   });
