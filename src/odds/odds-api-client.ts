@@ -6,9 +6,13 @@
  */
 
 import { OddsEvent, OddsEventOddsResponse } from './types';
+import { RateLimiter } from '../utils/rate-limiter';
 
 const BASE_URL = 'https://api.the-odds-api.com/v4';
 const FETCH_TIMEOUT_MS = 15_000;
+
+/** Shared limiter across all OddsApiClient instances (one per process). */
+const limiter = new RateLimiter(1_000); // 1 req/sec
 
 export class OddsApiClient {
   private apiKey: string;
@@ -47,7 +51,9 @@ export class OddsApiClient {
       url.searchParams.set(k, v);
     }
 
-    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const res = await limiter.schedule(() =>
+      fetch(url.toString(), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+    );
 
     // Track API quota from response headers
     const remaining = res.headers.get('x-requests-remaining');
