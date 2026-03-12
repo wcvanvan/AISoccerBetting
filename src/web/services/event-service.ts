@@ -1,8 +1,11 @@
 /**
- * EventService — lists upcoming soccer events from The Odds API.
- * Caches results in memory to avoid burning through the 500-request monthly limit.
+ * EventService — lists upcoming soccer fixtures from The Odds API.
+ * Per-league file cache (permanent) — only leagues without a cache file hit the API.
+ * Adding a new league to SUPPORTED_LEAGUES auto-fetches just that league.
  */
 
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join } from 'path';
 import { OddsApiClient } from '../../odds/odds-api-client';
 import { OddsEvent } from '../../odds/types';
 
@@ -23,84 +26,137 @@ export const SUPPORTED_LEAGUES: LeagueInfo[] = [
   { key: 'soccer_england_efl_cup', label: 'EFL Cup' },
 ];
 
-export interface EventWithLeague extends OddsEvent {
+export interface FixtureWithLeague extends OddsEvent {
   league_key: string;
   league_label: string;
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — matches rarely change
+const CACHE_DIR = join(process.cwd(), 'data', 'cache');
 
-let cachedEvents: EventWithLeague[] | null = null;
-let cachedAt = 0;
-let inflightFetch: Promise<EventWithLeague[]> | null = null;
+/** In-memory store: populated once, then served forever. */
+let memoryCache: Map<string, FixtureWithLeague[]> | null = null;
+let inflightLoad: Promise<void> | null = null;
 
-export async function getUpcomingEvents(
+// ── Public API ──────────────────────────────────────────────────────────────
+
+export async function getUpcomingFixtures(
   leagueKeys?: string[]
-): Promise<EventWithLeague[]> {
-  const now = Date.now();
-  if (cachedEvents && now - cachedAt < CACHE_TTL_MS) {
-    return filterByLeagues(cachedEvents, leagueKeys);
+): Promise<FixtureWithLeague[]> {
+  // Ensure cache is loaded (deduplicate concurrent calls)
+  if (!memoryCache) {
+    if (!inflightLoad) {
+      inflightLoad = loadAll().finally(() => { inflightLoad = null; });
+    }
+    await inflightLoad;
   }
 
-  // Deduplicate concurrent requests — reuse in-flight fetch
-  if (!inflightFetch) {
-    inflightFetch = fetchAllEvents().finally(() => {
-      inflightFetch = null;
-    });
-  }
-
-  const events = await inflightFetch;
-  return filterByLeagues(events, leagueKeys);
+  return mergeAndSort(memoryCache!, leagueKeys);
 }
 
-async function fetchAllEvents(): Promise<EventWithLeague[]> {
-  const apiKey = process.env.THE_ODDS_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error('THE_ODDS_API_KEY is not set');
-  }
+// ── Load all leagues (file cache + API for missing) ─────────────────────────
 
-  const client = new OddsApiClient(apiKey);
-  const allEvents: EventWithLeague[] = [];
+async function loadAll(): Promise<void> {
+  const map = new Map<string, FixtureWithLeague[]>();
+  const uncached: LeagueInfo[] = [];
 
-  const results = await Promise.allSettled(
+  // Try loading each league from file cache
+  await Promise.all(
     SUPPORTED_LEAGUES.map(async (league) => {
-      const events = await client.getEvents(league.key);
-      return events.map((e) => ({
-        ...e,
-        league_key: league.key,
-        league_label: league.label,
-      }));
+      const fixtures = await loadLeagueCache(league.key);
+      if (fixtures) {
+        map.set(league.key, fixtures);
+        console.log(`[odds-api] loaded ${fixtures.length} fixtures from cache: ${league.label}`);
+      } else {
+        uncached.push(league);
+      }
     })
   );
 
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      allEvents.push(...result.value);
+  // Fetch uncached leagues from API
+  if (uncached.length > 0) {
+    const apiKey = process.env.THE_ODDS_API_KEY?.trim();
+    if (!apiKey) {
+      if (map.size === 0) throw new Error('THE_ODDS_API_KEY is not set');
+      console.warn('[odds-api] no API key — serving cached leagues only');
+      memoryCache = map;
+      return;
+    }
+
+    const client = new OddsApiClient(apiKey);
+    const fetchResults = await Promise.allSettled(
+      uncached.map(async (league) => {
+        const raw = await client.getEvents(league.key);
+        const fixtures: FixtureWithLeague[] = raw.map((e) => ({
+          ...e,
+          league_key: league.key,
+          league_label: league.label,
+        }));
+        return { league, fixtures };
+      })
+    );
+
+    for (const result of fetchResults) {
+      if (result.status === 'fulfilled') {
+        const { league, fixtures } = result.value;
+        map.set(league.key, fixtures);
+        // Persist to file (fire-and-forget)
+        saveLeagueCache(league.key, fixtures).catch((err) => {
+          console.warn(`[odds-api] failed to write cache for ${league.key}:`, err.message);
+        });
+      } else {
+        console.warn(`[odds-api] failed to fetch league: ${result.reason}`);
+      }
+    }
+
+    if (client.lastQuota) {
+      console.log(`[odds-api] fetched ${uncached.length} league(s) from API — ${client.lastQuota.remaining} requests remaining (${client.lastQuota.used} used)`);
     }
   }
 
-  allEvents.sort(
+  memoryCache = map;
+}
+
+// ── Per-league file cache ───────────────────────────────────────────────────
+
+function leagueCachePath(leagueKey: string): string {
+  return join(CACHE_DIR, `fixtures-${leagueKey}.json`);
+}
+
+async function loadLeagueCache(leagueKey: string): Promise<FixtureWithLeague[] | null> {
+  try {
+    const raw = await readFile(leagueCachePath(leagueKey), 'utf-8');
+    const fixtures = JSON.parse(raw) as FixtureWithLeague[];
+    return Array.isArray(fixtures) ? fixtures : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveLeagueCache(leagueKey: string, fixtures: FixtureWithLeague[]): Promise<void> {
+  await mkdir(CACHE_DIR, { recursive: true });
+  await writeFile(leagueCachePath(leagueKey), JSON.stringify(fixtures), 'utf-8');
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function mergeAndSort(
+  map: Map<string, FixtureWithLeague[]>,
+  leagueKeys?: string[]
+): FixtureWithLeague[] {
+  const now = Date.now();
+  const all: FixtureWithLeague[] = [];
+  for (const [key, fixtures] of map) {
+    if (leagueKeys && leagueKeys.length > 0 && !leagueKeys.includes(key)) continue;
+    for (const f of fixtures) {
+      if (new Date(f.commence_time).getTime() > now) {
+        all.push(f);
+      }
+    }
+  }
+  all.sort(
     (a, b) =>
       new Date(a.commence_time).getTime() -
       new Date(b.commence_time).getTime()
   );
-
-  // Log quota once per fetch cycle
-  if (client.lastQuota) {
-    console.log(`[odds-api] fetched ${allEvents.length} events across ${SUPPORTED_LEAGUES.length} leagues — ${client.lastQuota.remaining} requests remaining (${client.lastQuota.used} used)`);
-  }
-
-  cachedEvents = allEvents;
-  cachedAt = Date.now();
-
-  return allEvents;
-}
-
-function filterByLeagues(
-  events: EventWithLeague[],
-  leagueKeys?: string[]
-): EventWithLeague[] {
-  if (!leagueKeys || leagueKeys.length === 0) return events;
-  const set = new Set(leagueKeys);
-  return events.filter((e) => set.has(e.league_key));
+  return all;
 }

@@ -3,7 +3,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { getUpcomingEvents, SUPPORTED_LEAGUES } from '../services/event-service';
+import { getUpcomingFixtures, SUPPORTED_LEAGUES } from '../services/event-service';
 
 export async function eventsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/events', async (request, reply) => {
@@ -17,8 +17,8 @@ export async function eventsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const events = await getUpcomingEvents(leagueKeys);
-      return { events, leagues: SUPPORTED_LEAGUES };
+      const fixtures = await getUpcomingFixtures(leagueKeys);
+      return { events: fixtures, leagues: SUPPORTED_LEAGUES };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       reply.status(500);

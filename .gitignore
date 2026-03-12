@@ -9,6 +9,7 @@ __pycache__/
 .cache/
 src/cache/data/
 data/reports/
+data/cache/
 # ad-hoc analysis outputs and scratch scripts in project root
 *.md
 !README.md
