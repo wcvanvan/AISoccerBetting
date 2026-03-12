@@ -72,13 +72,16 @@ async function loadAll(): Promise<void> {
     })
   );
 
+  // Commit whatever we have so far — even if API fetch fails below,
+  // partially-loaded leagues are still served and we don't retry on every request.
+  memoryCache = map;
+
   // Fetch uncached leagues from API
   if (uncached.length > 0) {
     const apiKey = process.env.THE_ODDS_API_KEY?.trim();
     if (!apiKey) {
       if (map.size === 0) throw new Error('THE_ODDS_API_KEY is not set');
       console.warn('[odds-api] no API key — serving cached leagues only');
-      memoryCache = map;
       return;
     }
 
@@ -112,8 +115,6 @@ async function loadAll(): Promise<void> {
       console.log(`[odds-api] fetched ${uncached.length} league(s) from API — ${client.lastQuota.remaining} requests remaining (${client.lastQuota.used} used)`);
     }
   }
-
-  memoryCache = map;
 }
 
 // ── Per-league file cache ───────────────────────────────────────────────────
@@ -143,15 +144,10 @@ function mergeAndSort(
   map: Map<string, FixtureWithLeague[]>,
   leagueKeys?: string[]
 ): FixtureWithLeague[] {
-  const now = Date.now();
   const all: FixtureWithLeague[] = [];
   for (const [key, fixtures] of map) {
     if (leagueKeys && leagueKeys.length > 0 && !leagueKeys.includes(key)) continue;
-    for (const f of fixtures) {
-      if (new Date(f.commence_time).getTime() > now) {
-        all.push(f);
-      }
-    }
+    all.push(...fixtures);
   }
   all.sort(
     (a, b) =>
