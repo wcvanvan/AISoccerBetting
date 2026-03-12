@@ -8,6 +8,7 @@ let currentUser = null; // { username, role }
 let currentMatch = null; // { home_team, away_team, date, league_key, league_label, commence_time }
 let currentMarket = 'goals';
 let currentJobId = null;
+let currentJobAnalyze = false;
 let eventSource = null;
 let elapsedTimer = null;
 let tabCache = {};
@@ -445,13 +446,13 @@ async function renderMatchPage() {
     const collectBtn = document.createElement('button');
     collectBtn.className = 'btn btn-secondary btn-sm';
     collectBtn.id = 'btn-collect';
-    collectBtn.textContent = 'Collect Data';
+    collectBtn.textContent = 'Collect Data Only';
     collectBtn.addEventListener('click', () => launchJob(false));
 
     const analyzeBtn = document.createElement('button');
     analyzeBtn.className = 'btn btn-primary btn-sm';
     analyzeBtn.id = 'btn-analyze';
-    analyzeBtn.textContent = 'Analyze';
+    analyzeBtn.textContent = 'Run Analysis';
     analyzeBtn.addEventListener('click', () => launchJob(true));
 
     actions.append(collectBtn, analyzeBtn);
@@ -481,6 +482,7 @@ function switchMarket(market) {
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
   if (eventSource) { eventSource.close(); eventSource = null; }
   currentJobId = null;
+  currentJobAnalyze = false;
   tabCache = {};
 
   // Update active tab
@@ -556,6 +558,7 @@ async function findActiveJob(homeTeam, awayTeam, date, market) {
 }
 
 function restoreJobProgress(job) {
+  currentJobAnalyze = !!job.analyze;
   // Render progress UI and replay existing logs
   renderJobProgress(job.id, job.createdAt);
 
@@ -605,7 +608,7 @@ async function renderMatchCachedResults(match, market, hasAnalysis) {
 
 // ── Job launch + progress ───────────────────────────────────────────────────
 
-function launchJob(analyze) {
+async function launchJob(analyze) {
   if (!currentMatch) return;
   const m = currentMatch;
 
@@ -615,10 +618,32 @@ function launchJob(analyze) {
     return;
   }
 
-  startJob(m.home_team, m.away_team, m.date, currentMarket, analyze);
+  // Check if data already exists — confirm before overwriting
+  let force = false;
+  try {
+    const params = new URLSearchParams({
+      homeTeam: m.home_team, awayTeam: m.away_team, date: m.date,
+    });
+    const resp = await fetch('/api/cache-status?' + params);
+    const data = await resp.json();
+    const marketInfo = (data.markets || {})[currentMarket];
+    if (marketInfo) {
+      let msg = null;
+      if (analyze && (marketInfo.hasReport || marketInfo.hasAnalysis)) {
+        msg = 'This will re-collect data and re-analyze, overwriting current ' + currentMarket + ' results. Proceed?';
+      } else if (!analyze && marketInfo.hasReport) {
+        msg = 'This will re-collect data, overwriting the current ' + currentMarket + ' report. Proceed?';
+      }
+      if (msg && !confirm(msg)) return;
+      if (msg) force = true;
+    }
+  } catch (_) {}
+
+  startJob(m.home_team, m.away_team, m.date, currentMarket, analyze, force);
 }
 
-async function startJob(homeTeam, awayTeam, date, market, analyze) {
+async function startJob(homeTeam, awayTeam, date, market, analyze, force) {
+  currentJobAnalyze = analyze;
   const collectBtn = document.getElementById('btn-collect');
   const analyzeBtn = document.getElementById('btn-analyze');
   if (collectBtn) { collectBtn.disabled = true; collectBtn.classList.add('loading'); }
@@ -629,7 +654,7 @@ async function startJob(homeTeam, awayTeam, date, market, analyze) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        homeTeam, awayTeam, date, market, analyze,
+        homeTeam, awayTeam, date, market, analyze, force,
         leagueKey: currentMatch ? currentMatch.league_key : '',
         leagueLabel: currentMatch ? currentMatch.league_label : '',
       }),
@@ -670,7 +695,7 @@ function renderJobProgress(jobId, createdAt) {
   const stepsBar = document.createElement('div');
   stepsBar.className = 'steps-bar';
   stepsBar.id = 'job-steps-' + jobId;
-  ['Collect', 'Process', 'Analyze', 'Done'].forEach((label) => {
+  ['Collect', 'Analyze', 'Done'].forEach((label) => {
     const step = document.createElement('div');
     step.className = 'step';
     step.textContent = label;
@@ -796,7 +821,6 @@ function updateJobStatus(jobId, status, message) {
     failed: 'Failed',
   };
 
-  const steps = ['collecting', 'collected', 'analyzing', 'complete'];
   const spinnerStatuses = ['pending', 'collecting', 'analyzing'];
 
   el.className = 'job-status status-' + status;
@@ -809,13 +833,24 @@ function updateJobStatus(jobId, status, message) {
   }
   el.appendChild(document.createTextNode(labels[status] || status));
 
-  // Update step progress bar
+  // Update step progress bar (3 steps: Collect, Analyze, Done)
   const stepsEl = document.getElementById('job-steps-' + jobId);
   if (stepsEl && status !== 'failed') {
-    const currentIdx = steps.indexOf(status);
+    let doneUpTo = -1;
+    let activeIdx = -1;
+    if (status === 'collecting') {
+      activeIdx = 0;
+    } else if (status === 'collected') {
+      doneUpTo = 0;
+    } else if (status === 'analyzing') {
+      doneUpTo = 0;
+      activeIdx = 1;
+    } else if (status === 'complete') {
+      doneUpTo = currentJobAnalyze ? 2 : 0;
+    }
     stepsEl.querySelectorAll('.step').forEach((step, i) => {
-      step.classList.toggle('step-done', i <= currentIdx);
-      step.classList.toggle('step-active', i === currentIdx && currentIdx < steps.length - 1);
+      step.classList.toggle('step-done', i <= doneUpTo);
+      step.classList.toggle('step-active', i === activeIdx);
     });
   }
 

@@ -73,12 +73,12 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
             return { jobId: existing.id, status: existing.status, duplicate: true };
           }
 
-          const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel);
+          const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel, true);
           job.reportPath = cached.reportPath;
           job.logs.push({ time: Date.now(), message: 'Using cached data report, skipping collection' });
 
           runPipelineForJob(job, true).catch(() => {});
-          return { jobId: job.id, status: job.status };
+          return { jobId: job.id, status: job.status, analyze: true };
         }
 
         // Fully cached (report + optional analysis) → return immediately
@@ -110,12 +110,12 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const analyze = body.analyze !== false;
-    const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel);
+    const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel, analyze);
 
     // Start pipeline in background (don't await — errors tracked in the job)
     runPipelineForJob(job, analyze).catch(() => {});
 
-    return { jobId: job.id, status: job.status };
+    return { jobId: job.id, status: job.status, analyze };
   });
 
   /** SSE stream for job progress */
@@ -256,6 +256,7 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
       awayTeam: j.awayTeam,
       date: j.date,
       market: j.market,
+      analyze: j.analyze,
       status: j.status,
       error: j.error,
       logs: j.logs,
