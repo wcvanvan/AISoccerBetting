@@ -87,7 +87,7 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 
 ### Analysis agent (src/agent/)
 
-- `report-analyzer.ts` — LangChain agent using `ANALYSIS_MODEL` (Opus) with extended thinking. Accepts an optional system prompt parameter for market-specific analysis. Results are cached (file-based, SHA256 hash).
+- `report-analyzer.ts` — LangChain agent using `ANALYSIS_MODEL` (Opus) with extended thinking. Accepts an optional system prompt parameter for market-specific analysis.
 - `prompts/report-analysis-system-prompt.ts` — corner analysis: venue-filtered stats, player/sub correlation, formation analysis, outlier handling, Negative Binomial distribution.
 - `prompts/goal-analysis-system-prompt.ts` — goal analysis: xG/npxG modeling, PPDA, deep completions, BTTS, spreads, Poisson distribution.
 - `prompts/card-analysis-system-prompt.ts` — card analysis: foul/card modeling, referee tendencies, booking points, Poisson/NB distribution.
@@ -97,12 +97,6 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 
 - `match-news-client.ts` — LangChain agent (Claude + Tavily tool), collects confirmed absences and tactical news only.
 - Failure is non-fatal: logged to stderr, report continues without news section.
-
-### LLM cache (src/cache/)
-
-- File-based cache keyed by SHA256 of (model + systemPrompt + userMessage).
-- TTL configurable via `LLM_CACHE_TTL_SEC` (default 24h).
-- Disable with `LLM_CACHE_DISABLED=1`.
 
 ### Web UI (src/web/)
 
@@ -133,7 +127,6 @@ src/
 +-- index.ts                # library exports
 +-- agent/                  # analyzer + match news (LangChain + Claude + Tavily)
 |   +-- prompts/            # system prompts for analysis and news
-+-- cache/                  # file-based LLM response cache
 +-- collector/              # MatchDataCollector orchestrator
 +-- formatter/              # Markdown report generator
 +-- odds/                   # The Odds API client + market config

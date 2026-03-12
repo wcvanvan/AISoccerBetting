@@ -17,7 +17,8 @@ import {
   MarketConfig,
 } from '../../odds';
 import { FormatOptions } from '../../formatter';
-import { buildReportFilename } from '../../utils/report-naming';
+import { buildReportFilename, buildNewsFilename } from '../../utils/report-naming';
+import { runMatchNews } from '../../agent';
 import { jobManager, Job, MarketType } from './job-manager';
 import { REPORTS_DIR } from './report-paths';
 
@@ -105,10 +106,36 @@ async function collectData(job: Job): Promise<void> {
 
     jobManager.addLog(job.id, 'Resolving team IDs and fetching match data...');
 
+    // News is shared across all markets — stored once as news.md in the match dir
+    const newsRelPath = buildNewsFilename(job.homeTeam, job.awayTeam, job.date);
+    const newsPath = path.join(REPORTS_DIR, newsRelPath);
+    let matchNewsSummary: string | undefined;
+
+    if (fs.existsSync(newsPath)) {
+      matchNewsSummary = fs.readFileSync(newsPath, 'utf8').trim() || undefined;
+      if (matchNewsSummary) {
+        jobManager.addLog(job.id, 'Loaded cached match news.');
+      }
+    } else {
+      try {
+        jobManager.addLog(job.id, 'Fetching match news...');
+        const news = await runMatchNews(job.homeTeam, job.awayTeam, job.date);
+        const newsDir = path.dirname(newsPath);
+        if (!fs.existsSync(newsDir)) fs.mkdirSync(newsDir, { recursive: true });
+        fs.writeFileSync(newsPath, news, 'utf8');
+        matchNewsSummary = news;
+        jobManager.addLog(job.id, 'Match news collected and cached.');
+      } catch (err) {
+        const msg = (err instanceof Error) ? err.message : String(err);
+        jobManager.addLog(job.id, `Match news skipped: ${msg}`);
+      }
+    }
+
     const markdown = await collector.collect_data({
       teamA_name: job.homeTeam,
       teamB_name: job.awayTeam,
       match_date: job.date,
+      matchNewsSummary,
     });
 
     const relPath = buildReportFilename(

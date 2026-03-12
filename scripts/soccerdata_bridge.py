@@ -9,6 +9,7 @@ Protocol:
   stdout ← {"result": ..., "id": 1}    or    {"error": "...", "id": 1}
   stderr ← informational logging (not parsed by TS)
 """
+from __future__ import annotations
 
 import json
 import logging

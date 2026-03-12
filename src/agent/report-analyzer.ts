@@ -24,7 +24,6 @@ import { configureAnthropicProxy } from './configure-proxy';
 import { stripCodeFences } from './strip-code-fences';
 import { extractTextContent } from './extract-content';
 import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './prompts/report-analysis-system-prompt';
-import { getCachedResponse, setCachedResponse } from '../cache';
 
 const DEFAULT_ANALYSIS_MODEL = 'claude-opus-4-6';
 const DEFAULT_ANALYSIS_TIMEOUT_SEC = 300;
@@ -53,9 +52,6 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
   const model = process.env.ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL;
   const prompt = systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT;
 
-  // Check cache first
-  const cached = getCachedResponse(model, prompt, report);
-  if (cached) return cached;
   const maxTokens = parsePositiveInt(process.env.ANALYSIS_MAX_TOKENS, DEFAULT_MAX_TOKENS);
   const thinkingBudget = parsePositiveInt(process.env.ANALYSIS_THINKING_BUDGET, DEFAULT_THINKING_BUDGET);
 
@@ -84,11 +80,7 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
 
   const text = extractTextContent(content);
   if (!text) throw new Error('Analysis returned no text content.');
-  const result = stripCodeFences(text);
-
-  // Cache the response
-  setCachedResponse(model, prompt, report, result);
-  return result;
+  return stripCodeFences(text);
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
