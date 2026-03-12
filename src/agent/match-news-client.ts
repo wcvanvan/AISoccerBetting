@@ -18,6 +18,7 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
 import { stripCodeFences } from './strip-code-fences';
 import { extractTextContent } from './extract-content';
+import { config } from '../config';
 import { MATCH_NEWS_SYSTEM_PROMPT } from './prompts/match-news-system-prompt';
 
 function buildUserMessage(teamA: string, teamB: string, matchDate: string): string {
@@ -33,11 +34,11 @@ export async function runMatchNews(
   teamB: string,
   matchDate: string
 ): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const apiKey = config.anthropicApiKey;
   if (!apiKey) {
     throw new Error('Set ANTHROPIC_API_KEY in .env to fetch match news.');
   }
-  if (!process.env.TAVILY_API_KEY?.trim()) {
+  if (!config.tavilyApiKey) {
     throw new Error('Set TAVILY_API_KEY in .env for web search (free key at app.tavily.com).');
   }
 
@@ -45,8 +46,7 @@ export async function runMatchNews(
 
   const userMessage = buildUserMessage(teamA, teamB, matchDate);
 
-  const model = process.env.WEB_SEARCH_MODEL?.trim() || 'claude-sonnet-4-6';
-  const llm = new ChatAnthropic({ model, apiKey });
+  const llm = new ChatAnthropic({ model: config.news.model, apiKey });
   const tavilyTool = new TavilySearch({ maxResults: 5 });
 
   const agent = createAgent({ model: llm, tools: [tavilyTool] });

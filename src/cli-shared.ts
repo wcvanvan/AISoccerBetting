@@ -14,6 +14,7 @@ import { FormatOptions } from './formatter';
 import { SoccerdataProvider } from './provider';
 import { ChatAnthropic } from '@langchain/anthropic';
 import { HumanMessage } from '@langchain/core/messages';
+import { config } from './config';
 
 // ── Pipeline configuration ──────────────────────────────────────────────────
 
@@ -257,12 +258,12 @@ async function listOddsEvents(apiKey: string): Promise<void> {
 // ── Test connection ─────────────────────────────────────────────────────────
 
 async function testConnection(): Promise<void> {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const apiKey = config.anthropicApiKey;
   if (!apiKey) {
     console.error('Error: ANTHROPIC_API_KEY is not set in .env');
     process.exit(1);
   }
-  const model = process.env.ANALYSIS_MODEL?.trim() || 'claude-opus-4-6';
+  const model = config.analysis.model;
   console.log(`Testing connection to ${model}...`);
   const start = Date.now();
   try {
@@ -372,9 +373,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     const collector = new MatchDataCollector(provider, marketConfig, formatOptions);
 
     let matchNewsSummary: string | undefined;
-    const useMatchNews =
-      process.env.MATCH_NEWS_FETCHING === 'true' || process.env.MATCH_NEWS_FETCHING === '1';
-    if (useMatchNews) {
+    if (config.matchNewsFetching) {
       try {
         matchNewsSummary = await runMatchNews(args.teamA, args.teamB, args.date);
       } catch (err) {
@@ -396,9 +395,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     fs.writeFileSync(reportFilename, markdown, 'utf8');
     console.log(`Report saved → ${reportFilename}`);
 
-    const useAnalysis =
-      process.env.ANALYSIS_ENABLED === 'true' || process.env.ANALYSIS_ENABLED === '1';
-    if (useAnalysis) {
+    if (config.analysisEnabled) {
       try {
         const analysisFilename = _buildAnalysisFilename(args.teamA, args.teamB, args.date, toolName);
         await runAnalysis(markdown, analysisFilename, analysisPrompt, marketLabel);

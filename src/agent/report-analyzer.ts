@@ -1,19 +1,9 @@
 /**
- * Report analyzer: runs a LangChain agent (Claude Opus + Tavily web search)
- * to perform corner betting value analysis on a collected match report.
+ * Report analyzer: analyses a collected match report to identify value bets.
  *
- * The agent can optionally search the web for supplementary data (e.g. xG,
- * advanced corner stats) when the report alone is insufficient.
- *
- * Requires in .env:
- *   ANTHROPIC_API_KEY        – for Claude
- *   TAVILY_API_KEY           – for web search (optional; falls back to single-shot if unset)
- * Optional (defaults in .env.defaults):
- *   ANALYSIS_MODEL           – Claude model (default: claude-opus-4-6)
- *   ANALYSIS_MAX_TOKENS      – total output budget incl. thinking (default: 32768)
- *   ANALYSIS_THINKING_BUDGET – internal reasoning budget, 0 to disable (default: 10000)
- *   ANALYSIS_TIMEOUT         – seconds before abort (default: 300)
- *   ANTHROPIC_PROXY / HTTP_PROXY – proxy for outbound requests
+ * Supports two modes controlled by LLM_MODE env var:
+ *   - "cli"  (default) — shells out to `claude --print` (uses CLI subscription, saves API cost)
+ *   - "api"  — LangChain agent with Claude Opus + optional Tavily web search
  */
 
 import { createAgent } from 'langchain';
@@ -23,37 +13,72 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
 import { stripCodeFences } from './strip-code-fences';
 import { extractTextContent } from './extract-content';
+import { runClaudeCli, ClaudeCliOptions } from './claude-cli';
+import { config } from '../config';
 import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './prompts/report-analysis-system-prompt';
 
-const DEFAULT_ANALYSIS_MODEL = 'claude-opus-4-6';
-const DEFAULT_ANALYSIS_TIMEOUT_SEC = 300;
-const DEFAULT_MAX_TOKENS = 32_768;
-const DEFAULT_THINKING_BUDGET = 10_000;
 const PROGRESS_INTERVAL_SEC = 60;
 
 /**
  * Analyse a match report markdown string and return a human-readable
- * markdown analysis identifying value corner betting opportunities.
+ * markdown analysis identifying value betting opportunities.
  *
- * If TAVILY_API_KEY is set, the agent can search the web for additional data.
- * Otherwise it runs as a single-shot call using only the report.
- *
- * Controlled by ANALYSIS_TIMEOUT (seconds, default 300). Logs progress
- * every 30s so the user knows it hasn't hung.
+ * Routes to CLI or API mode based on LLM_MODE env var.
  */
-export async function analyzeReport(report: string, systemPrompt?: string): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+export async function analyzeReport(
+  report: string,
+  systemPrompt?: string,
+  opts?: { onLog?: (line: string) => void },
+): Promise<string> {
+  const prompt = systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT;
+
+  if (config.llmMode === 'cli') {
+    return analyzeViaCli(report, prompt, opts);
+  }
+  return analyzeViaApi(report, prompt, opts);
+}
+
+// ── CLI mode ────────────────────────────────────────────────────────────────
+
+async function analyzeViaCli(
+  report: string,
+  systemPrompt: string,
+  opts?: { onLog?: (line: string) => void },
+): Promise<string> {
+  const timeoutSec = config.analysis.timeoutSec;
+  const cliPrompt = [systemPrompt, '', '---', '', report].join('\n');
+
+  const log = opts?.onLog ?? ((msg: string) => console.error(msg));
+  log(`  Analysis via Claude CLI (timeout ${timeoutSec}s)...`);
+  const startMs = Date.now();
+
+  const cliOpts: ClaudeCliOptions = {
+    timeoutMs: timeoutSec * 1000,
+    onLog: opts?.onLog,
+  };
+
+  const result = await runClaudeCli(cliPrompt, cliOpts);
+  const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
+  log(`  Analysis completed in ${elapsed}s`);
+
+  return stripCodeFences(result);
+}
+
+// ── API mode ────────────────────────────────────────────────────────────────
+
+async function analyzeViaApi(
+  report: string,
+  systemPrompt: string,
+  opts?: { onLog?: (line: string) => void },
+): Promise<string> {
+  const apiKey = config.anthropicApiKey;
   if (!apiKey) {
-    throw new Error('Set ANTHROPIC_API_KEY in .env to run report analysis.');
+    throw new Error('Set ANTHROPIC_API_KEY in .env to run report analysis in API mode.');
   }
 
   configureAnthropicProxy();
 
-  const model = process.env.ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL;
-  const prompt = systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT;
-
-  const maxTokens = parsePositiveInt(process.env.ANALYSIS_MAX_TOKENS, DEFAULT_MAX_TOKENS);
-  const thinkingBudget = parsePositiveInt(process.env.ANALYSIS_THINKING_BUDGET, DEFAULT_THINKING_BUDGET);
+  const { model, maxTokens, thinkingBudget } = config.analysis;
 
   const llm = new ChatAnthropic({
     model,
@@ -65,17 +90,18 @@ export async function analyzeReport(report: string, systemPrompt?: string): Prom
     }),
   });
 
-  const hasTavily = !!process.env.TAVILY_API_KEY?.trim();
+  const hasTavily = !!config.tavilyApiKey;
 
   const messages = [
-    new SystemMessage(prompt),
+    new SystemMessage(systemPrompt),
     new HumanMessage(report),
   ];
 
-  const timeoutSec = parseTimeout();
+  const timeoutSec = config.analysis.timeoutSec;
   const content = await withTimeoutAndProgress(
     () => invokeModel(llm, messages, hasTavily),
     timeoutSec,
+    opts?.onLog,
   );
 
   const text = extractTextContent(content);
@@ -101,21 +127,12 @@ async function invokeModel(
   return result.content;
 }
 
-function parseTimeout(): number {
-  return parsePositiveInt(process.env.ANALYSIS_TIMEOUT, DEFAULT_ANALYSIS_TIMEOUT_SEC);
-}
-
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  const trimmed = raw?.trim();
-  if (!trimmed) return fallback;
-  const n = Number(trimmed);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
 async function withTimeoutAndProgress<T>(
   fn: () => Promise<T>,
   timeoutSec: number,
+  onLog?: (line: string) => void,
 ): Promise<T> {
+  const log = onLog ?? ((msg: string) => console.error(msg));
   const startMs = Date.now();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -123,7 +140,7 @@ async function withTimeoutAndProgress<T>(
     const elapsed = Math.round((Date.now() - startMs) / 1000);
     const remaining = timeoutSec - elapsed;
     if (remaining > 0) {
-      console.error(`  Analysis in progress... ${elapsed}s elapsed (timeout in ${remaining}s)`);
+      log(`  Analysis in progress... ${elapsed}s elapsed (timeout in ${remaining}s)`);
     }
   }, PROGRESS_INTERVAL_SEC * 1000);
 
@@ -143,6 +160,6 @@ async function withTimeoutAndProgress<T>(
     clearInterval(progress);
     if (timeoutId) clearTimeout(timeoutId);
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-    console.error(`  Analysis completed in ${elapsed}s`);
+    log(`  Analysis completed in ${elapsed}s`);
   }
 }

@@ -59,7 +59,7 @@ Web UI (src/cli-web.ts -> src/web/server.ts)
  +-- Routes: /api/events, /api/analysis, /api/reports
  +-- Services:
       +-- event-service: Odds API event listing (30-min cache)
-      +-- pipeline-service: data collection + Claude Code CLI analysis
+      +-- pipeline-service: data collection + unified analyzeReport (LLM_MODE switch)
       +-- job-manager: serial job queue with SSE progress streaming
 ```
 
@@ -87,7 +87,8 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 
 ### Analysis agent (src/agent/)
 
-- `report-analyzer.ts` — LangChain agent using `ANALYSIS_MODEL` (Opus) with extended thinking. Accepts an optional system prompt parameter for market-specific analysis.
+- `report-analyzer.ts` — unified analysis entry point. `LLM_MODE=cli` (default) shells out to `claude --print`; `LLM_MODE=api` uses LangChain (Opus + optional Tavily). Both modes use the same system prompts from `prompts/`.
+- `claude-cli.ts` — shared helper for running prompts via `claude --print`.
 - `prompts/report-analysis-system-prompt.ts` — corner analysis: venue-filtered stats, player/sub correlation, formation analysis, outlier handling, Negative Binomial distribution.
 - `prompts/goal-analysis-system-prompt.ts` — goal analysis: xG/npxG modeling, PPDA, deep completions, BTTS, spreads, Poisson distribution.
 - `prompts/card-analysis-system-prompt.ts` — card analysis: foul/card modeling, referee tendencies, booking points, Poisson/NB distribution.
@@ -104,7 +105,7 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 - Session-based auth with env-configured users (admin = full access, reader = view cached results only; History nav hidden for readers).
 - Matches page: date-paged view with pill navigation (keyboard left/right), matches grouped by league per date. Data merged from Odds API + history reports. Auto-lands on today or nearest future date.
 - Job queue: max 1 concurrent, with SSE progress streaming.
-- Analysis shells out to `claude --print` CLI (avoids API costs when running locally).
+- Analysis uses unified `analyzeReport()` — `LLM_MODE=cli` (default) for local dev, `LLM_MODE=api` for production/Vercel.
 - Reports stored in `data/reports/` with `meta.json` for league metadata.
 
 ## Output files
@@ -141,6 +142,10 @@ scripts/
 +-- requirements.txt        # Python dependencies (soccerdata, pandas)
 +-- soccerdata_bridge.py    # Python bridge — multi-source data assembly
 ```
+
+## Code conventions
+
+- **No inline values**: never hardcode prompts, env var names, or configuration values inline in consuming code. Always define them in a centralized module and import from there. System prompts live in `src/agent/prompts/`, market configs in `src/odds/market-config.ts`, etc.
 
 ## Known limitations
 

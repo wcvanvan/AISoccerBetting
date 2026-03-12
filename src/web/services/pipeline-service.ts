@@ -1,11 +1,10 @@
 /**
  * PipelineService — orchestrates data collection (direct import) and
- * analysis (Claude Code CLI shell-out) for a given job.
+ * analysis (unified analyzeReport with LLM_MODE switching) for a given job.
  */
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn } from 'child_process';
 
 import { configureAnthropicProxy } from '../../agent/configure-proxy';
 import { MatchDataCollector } from '../../collector';
@@ -18,17 +17,22 @@ import {
 } from '../../odds';
 import { FormatOptions } from '../../formatter';
 import { buildReportFilename, buildNewsFilename } from '../../utils/report-naming';
-import { runMatchNews } from '../../agent';
+import {
+  runMatchNews,
+  analyzeReport,
+  REPORT_ANALYSIS_SYSTEM_PROMPT,
+  GOAL_ANALYSIS_SYSTEM_PROMPT,
+  CARD_ANALYSIS_SYSTEM_PROMPT,
+} from '../../agent';
 import { jobManager, Job, MarketType } from './job-manager';
 import { REPORTS_DIR } from './report-paths';
-
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 
 interface MarketPipelineConfig {
   marketConfig: MarketConfig;
   formatOptions: Partial<FormatOptions>;
   toolName: string;
   marketLabel: string;
+  analysisPrompt: string;
 }
 
 const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
@@ -37,18 +41,21 @@ const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
     formatOptions: { showCorners: true, oddsLabel: 'Corner' },
     toolName: 'corners',
     marketLabel: 'corner',
+    analysisPrompt: REPORT_ANALYSIS_SYSTEM_PROMPT,
   },
   goals: {
     marketConfig: GOAL_MARKET_CONFIG,
     formatOptions: { showCorners: false, oddsLabel: 'Goal' },
     toolName: 'goals',
     marketLabel: 'goal',
+    analysisPrompt: GOAL_ANALYSIS_SYSTEM_PROMPT,
   },
   cards: {
     marketConfig: CARD_MARKET_CONFIG,
     formatOptions: { showCorners: false, oddsLabel: 'Card' },
     toolName: 'cards',
     marketLabel: 'card',
+    analysisPrompt: CARD_ANALYSIS_SYSTEM_PROMPT,
   },
 };
 
@@ -182,98 +189,20 @@ async function runAnalysis(job: Job): Promise<void> {
   jobManager.updateStatus(
     job.id,
     'analyzing',
-    'Starting analysis via Claude Code agent...'
+    'Starting analysis...'
   );
 
   const config = MARKET_CONFIGS[job.market];
   const analysisPath = job.reportPath!.replace(/\.md$/, '-analysis.md');
   const reportContent = fs.readFileSync(job.reportPath!, 'utf8');
 
-  // Pipe full report content via stdin since --print mode cannot access local files
-  const prompt = [
-    `You are a professional soccer betting analyst specializing in ${config.marketLabel} markets.`,
-    `Analyze the following match data report and produce a comprehensive betting analysis.`,
-    `Focus on identifying value bets with clear statistical reasoning.`,
-    `Structure your output with these sections:`,
-    `- Statistical Analysis (key metrics, trends)`,
-    `- Predictions (expected outcomes with probabilities)`,
-    `- Value Picks (specific bets with edge calculations)`,
-    `- Bets to Avoid`,
-    ``,
-    `Here is the match data report:`,
-    ``,
+  const analysis = await analyzeReport(
     reportContent,
-  ].join('\n');
+    config.analysisPrompt,
+    { onLog: (line) => jobManager.addLog(job.id, line) },
+  );
 
-  return new Promise<void>((resolve, reject) => {
-    // Use --print and pipe prompt via stdin to avoid OS arg length limits
-    const child = spawn(
-      'claude',
-      ['--print', '--output-format', 'text'],
-      {
-        cwd: PROJECT_ROOT,
-        env: { ...process.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    );
-
-    let stdout = '';
-    let timedOut = false;
-
-    // 10-minute timeout
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-    }, 10 * 60 * 1000);
-
-    // Send prompt via stdin
-    child.stdin.write(prompt);
-    child.stdin.end();
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString().trim();
-      if (text) {
-        jobManager.addLog(job.id, text);
-      }
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(
-        new Error(
-          `Claude Code CLI not found. Install it: npm install -g @anthropic-ai/claude-code. ${err.message}`
-        )
-      );
-    });
-
-    child.on('exit', (code) => {
-      clearTimeout(timeout);
-
-      if (timedOut) {
-        reject(new Error('Analysis timed out after 10 minutes'));
-        return;
-      }
-
-      // Claude --print outputs the analysis to stdout; save it
-      if (stdout.trim()) {
-        fs.writeFileSync(analysisPath, stdout.trim(), 'utf8');
-      }
-
-      if (fs.existsSync(analysisPath)) {
-        job.analysisPath = analysisPath;
-        jobManager.setComplete(job.id);
-        resolve();
-      } else if (code !== 0) {
-        reject(
-          new Error(`Claude Code exited with code ${code}`)
-        );
-      } else {
-        reject(new Error('Analysis produced no output'));
-      }
-    });
-  });
+  fs.writeFileSync(analysisPath, analysis, 'utf8');
+  job.analysisPath = analysisPath;
+  jobManager.setComplete(job.id);
 }
