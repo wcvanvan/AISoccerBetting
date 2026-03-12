@@ -509,6 +509,14 @@ async function loadMarketData() {
 
   const m = currentMatch;
 
+  // Check for active (running) jobs first — takes priority over cached results
+  const activeJob = await findActiveJob(m.home_team, m.away_team, m.date, currentMarket);
+  if (activeJob) {
+    currentJobId = activeJob.id;
+    restoreJobProgress(activeJob);
+    return;
+  }
+
   // Check if cached data exists for this market
   try {
     const params = new URLSearchParams({
@@ -521,19 +529,10 @@ async function loadMarketData() {
     const marketInfo = (data.markets || {})[currentMarket];
 
     if (marketInfo && (marketInfo.hasReport || marketInfo.hasAnalysis)) {
-      // Render cached results directly using match-based report routes (no job creation)
       renderMatchCachedResults(m, currentMarket, marketInfo.hasAnalysis);
       return;
     }
   } catch (_) {}
-
-  // Check for active (running) jobs for this match+market
-  const activeJob = await findActiveJob(m.home_team, m.away_team, m.date, currentMarket);
-  if (activeJob) {
-    currentJobId = activeJob.id;
-    restoreJobProgress(activeJob);
-    return;
-  }
 
   // No cached data and no running jobs
   resultsArea.innerHTML = '<div class="empty-state"><p>No data collected yet for ' + currentMarket + ' market.</p></div>';
@@ -629,7 +628,7 @@ async function launchJob(analyze) {
     const marketInfo = (data.markets || {})[currentMarket];
     if (marketInfo) {
       let msg = null;
-      if (analyze && (marketInfo.hasReport || marketInfo.hasAnalysis)) {
+      if (analyze && marketInfo.hasAnalysis) {
         msg = 'This will re-collect data and re-analyze, overwriting current ' + currentMarket + ' results. Proceed?';
       } else if (!analyze && marketInfo.hasReport) {
         msg = 'This will re-collect data, overwriting the current ' + currentMarket + ' report. Proceed?';
