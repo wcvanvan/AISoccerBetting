@@ -6,6 +6,8 @@
 import * as path from 'path';
 import * as fs from 'fs';
 
+const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
+
 import { configureAnthropicProxy } from './agent/configure-proxy';
 import { MatchDataCollector } from './collector';
 import { runMatchNews, analyzeReport } from './agent';
@@ -260,7 +262,7 @@ async function listOddsEvents(apiKey: string): Promise<void> {
 async function testConnection(): Promise<void> {
   const apiKey = config.anthropicApiKey;
   if (!apiKey) {
-    console.error('Error: ANTHROPIC_API_KEY is not set in .env');
+    console.error('Error: CLAUDE_API_KEY is not set in .env');
     process.exit(1);
   }
   const model = config.analysis.model;
@@ -324,7 +326,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
   // ── Standalone match news mode ──
   if (args.mode === 'news') {
-    const newsFilename = _buildNewsFilename(args.teamA, args.teamB, args.date);
+    const newsFilename = path.join(REPORTS_DIR, _buildNewsFilename(args.teamA, args.teamB, args.date));
     const newsDir = path.dirname(newsFilename);
     if (!fs.existsSync(newsDir)) fs.mkdirSync(newsDir, { recursive: true });
     try {
@@ -389,15 +391,16 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       matchNewsSummary,
     });
 
-    const reportFilename = _buildReportFilename(args.teamA, args.teamB, args.date, toolName);
+    const reportFilename = path.join(REPORTS_DIR, _buildReportFilename(args.teamA, args.teamB, args.date, toolName));
     const reportDir = path.dirname(reportFilename);
     if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
     fs.writeFileSync(reportFilename, markdown, 'utf8');
+    writeMetaJson(reportDir, args.teamA, args.teamB);
     console.log(`Report saved → ${reportFilename}`);
 
     if (config.analysisEnabled) {
       try {
-        const analysisFilename = _buildAnalysisFilename(args.teamA, args.teamB, args.date, toolName);
+        const analysisFilename = path.join(REPORTS_DIR, _buildAnalysisFilename(args.teamA, args.teamB, args.date, toolName));
         await runAnalysis(markdown, analysisFilename, analysisPrompt, marketLabel);
       } catch (err) {
         const msg = errorMsg(err);
@@ -429,4 +432,45 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
     process.exit(1);
   }
+}
+
+// ── League metadata for CLI-generated reports ───────────────────────────────
+
+const CACHE_DIR = path.join(__dirname, '..', 'data', 'cache');
+
+/** Look up league info from fixture cache files by matching team names. */
+function findLeagueForMatch(teamA: string, teamB: string): { leagueKey: string; leagueLabel: string } | null {
+  if (!fs.existsSync(CACHE_DIR)) return null;
+  const files = fs.readdirSync(CACHE_DIR).filter(f => f.startsWith('fixtures-') && f.endsWith('.json'));
+  const lower = (s: string) => s.toLowerCase();
+  const a = lower(teamA);
+  const b = lower(teamB);
+
+  for (const file of files) {
+    try {
+      const fixtures = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, file), 'utf8'));
+      if (!Array.isArray(fixtures)) continue;
+      for (const f of fixtures) {
+        if ((lower(f.home_team).includes(a) && lower(f.away_team).includes(b)) ||
+            (lower(f.home_team).includes(b) && lower(f.away_team).includes(a))) {
+          return { leagueKey: f.league_key, leagueLabel: f.league_label };
+        }
+      }
+    } catch { /* skip corrupt cache */ }
+  }
+  return null;
+}
+
+/** Write meta.json with league info into the report directory. */
+function writeMetaJson(reportDir: string, teamA: string, teamB: string): void {
+  const league = findLeagueForMatch(teamA, teamB);
+  if (!league) return;
+  const metaPath = path.join(reportDir, 'meta.json');
+  let meta: Record<string, string> = {};
+  if (fs.existsSync(metaPath)) {
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { /* overwrite */ }
+  }
+  meta.leagueKey = league.leagueKey;
+  meta.leagueLabel = league.leagueLabel;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8');
 }
