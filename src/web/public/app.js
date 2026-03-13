@@ -586,13 +586,6 @@ function restoreJobProgress(job) {
   connectSSE(job.id);
 }
 
-async function renderCachedResults(jobId, hasAnalysis) {
-  const resultsArea = document.getElementById('match-results');
-  await renderResultTabs(resultsArea, hasAnalysis, (container, tab) => {
-    return loadReportTab(container, '/api/reports/' + jobId + '/' + tab, jobId + ':' + tab);
-  });
-}
-
 async function renderMatchCachedResults(match, market, hasAnalysis) {
   const resultsArea = document.getElementById('match-results');
   const params = new URLSearchParams({
@@ -667,16 +660,15 @@ async function startJob(homeTeam, awayTeam, date, market, analyze, force) {
       return;
     }
 
-    currentJobId = data.jobId;
-    tabCache = {};
-
     if (data.cached) {
       if (collectBtn) { collectBtn.disabled = false; collectBtn.classList.remove('loading'); }
       if (analyzeBtn) { analyzeBtn.disabled = false; analyzeBtn.classList.remove('loading'); }
-      renderCachedResults(data.jobId, true);
+      loadMarketData();
       return;
     }
 
+    currentJobId = data.jobId;
+    tabCache = {};
     renderJobProgress(data.jobId);
     connectSSE(data.jobId);
   } catch (err) {

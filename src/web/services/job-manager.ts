@@ -128,6 +128,7 @@ class JobManagerImpl {
       analysisPath: job.analysisPath,
     });
     this.cleanupEmitter(id);
+    this.jobs.delete(id);
   }
 
   private cleanupEmitter(id: string): void {

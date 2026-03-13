@@ -81,15 +81,8 @@ export async function analysisRoutes(app: FastifyInstance): Promise<void> {
           return { jobId: job.id, status: job.status, analyze: true };
         }
 
-        // Fully cached (report + optional analysis) → return immediately
-        const job = jobManager.create(homeTeam, awayTeam, date, market, leagueKey, leagueLabel);
-        job.reportPath = cached.reportPath;
-        job.analysisPath = cached.analysisPath;
-        job.status = 'complete';
-        job.updatedAt = Date.now();
-        job.logs.push({ time: Date.now(), message: 'Loaded from cached results' });
+        // Fully cached (report + optional analysis) → return immediately, no job needed
         return {
-          jobId: job.id,
           status: 'complete',
           cached: true,
           hasReport: true,

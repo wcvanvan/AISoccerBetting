@@ -6,7 +6,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { FastifyInstance } from 'fastify';
 import { marked } from 'marked';
-import { jobManager } from '../services/job-manager';
 import { getCachedPaths, REPORTS_DIR } from '../services/report-paths';
 import { MarketType } from '../services/job-manager';
 
@@ -46,62 +45,6 @@ function renderConcise(analysisPath: string): string {
 }
 
 export async function reportsRoutes(app: FastifyInstance): Promise<void> {
-  /** Get the raw data report as rendered HTML */
-  app.get('/api/reports/:id/raw', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = jobManager.get(id);
-
-    if (!job) {
-      reply.status(404);
-      return { error: 'Job not found' };
-    }
-
-    if (!job.reportPath || !fs.existsSync(job.reportPath)) {
-      reply.status(404);
-      return { error: 'Report not yet available' };
-    }
-
-    const html = renderCached(job.reportPath);
-    return { html };
-  });
-
-  /** Get the full analysis as rendered HTML */
-  app.get('/api/reports/:id/analysis', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = jobManager.get(id);
-
-    if (!job) {
-      reply.status(404);
-      return { error: 'Job not found' };
-    }
-
-    if (!job.analysisPath || !fs.existsSync(job.analysisPath)) {
-      reply.status(404);
-      return { error: 'Analysis not yet available' };
-    }
-
-    const html = renderCached(job.analysisPath);
-    return { html };
-  });
-
-  /** Get concise value picks extracted from the analysis */
-  app.get('/api/reports/:id/concise', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const job = jobManager.get(id);
-
-    if (!job) {
-      reply.status(404);
-      return { error: 'Job not found' };
-    }
-
-    if (!job.analysisPath || !fs.existsSync(job.analysisPath)) {
-      reply.status(404);
-      return { error: 'Analysis not yet available' };
-    }
-
-    return { html: renderConcise(job.analysisPath) };
-  });
-
   /**
    * Serve report content by match + market (no job ID needed).
    * Used by the history page to view CLI-generated and cached reports.
