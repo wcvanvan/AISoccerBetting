@@ -56,10 +56,7 @@ async function analyzeViaCli(
   const cliPrompt = [systemPrompt, '', '---', '', report].join('\n');
 
   const log = opts?.onLog ?? ((msg: string) => console.error(msg));
-  log(`  Analysis via Claude CLI (no timeout)...`);
-  if (opts?.outputPath) {
-    log(`  Streaming output to ${opts.outputPath} — tail -f to monitor`);
-  }
+  log(`  Analysis via Claude CLI (no timeout, output written on completion)...`);
   const startMs = Date.now();
 
   const progress = setInterval(() => {
@@ -70,7 +67,6 @@ async function analyzeViaCli(
   try {
     const result = await runClaudeCli(cliPrompt, {
       onLog: opts?.onLog,
-      outputPath: opts?.outputPath,
     });
     return stripCodeFences(result);
   } finally {
@@ -89,7 +85,7 @@ async function analyzeViaApi(
 ): Promise<string> {
   const apiKey = config.anthropicApiKey;
   if (!apiKey) {
-    throw new Error('Set ANTHROPIC_API_KEY in .env to run report analysis in API mode.');
+    throw new Error('Set CLAUDE_API_KEY in .env to run report analysis in API mode.');
   }
 
   configureAnthropicProxy();

@@ -205,7 +205,8 @@ async function runAnalysis(job: Job): Promise<void> {
     },
   );
 
-  // CLI mode already streams to the file; write final result to ensure completeness
+  // API streaming mode writes incremental chunks to outputPath during analysis;
+  // final write here ensures the file has the complete, fence-stripped result.
   fs.writeFileSync(analysisPath, analysis, 'utf8');
   job.analysisPath = analysisPath;
   jobManager.setComplete(job.id);

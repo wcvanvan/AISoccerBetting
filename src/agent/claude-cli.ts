@@ -1,17 +1,18 @@
 /**
  * Shared helper for running prompts via the Claude CLI (`claude --print`).
  * Used by report-analyzer.ts when LLM_MODE=cli (the default).
+ *
+ * NOTE: `claude --print` buffers all output until the full response is ready,
+ * so real-time file streaming is not possible in CLI mode.
+ * Use LLM_MODE=api for incremental streaming to file.
  */
 
 import { spawn } from 'child_process';
 import * as path from 'path';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 export interface ClaudeCliOptions {
-  /** Timeout in milliseconds (default: 10 minutes) */
-  timeoutMs?: number;
   /** Optional log callback for stderr lines */
   onLog?: (line: string) => void;
 }
@@ -24,26 +25,27 @@ export function runClaudeCli(
   prompt: string,
   opts: ClaudeCliOptions = {},
 ): Promise<string> {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, onLog } = opts;
+  const { onLog } = opts;
 
   return new Promise<string>((resolve, reject) => {
+    // Remove CLAUDECODE env vars to prevent "nested session" error
+    // when the web server is started from inside a Claude Code terminal
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+
     const child = spawn(
       'claude',
       ['--print', '--output-format', 'text'],
       {
         cwd: PROJECT_ROOT,
-        env: { ...process.env },
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
 
     let stdout = '';
-    let timedOut = false;
-
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-    }, timeoutMs);
+    let stderr = '';
 
     child.stdin.write(prompt);
     child.stdin.end();
@@ -54,11 +56,13 @@ export function runClaudeCli(
 
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trim();
-      if (text && onLog) onLog(text);
+      if (text) {
+        stderr += text + '\n';
+        if (onLog) onLog(text);
+      }
     });
 
     child.on('error', (err) => {
-      clearTimeout(timeout);
       reject(
         new Error(
           `Claude CLI not found. Install it: npm install -g @anthropic-ai/claude-code. ${err.message}`,
@@ -67,24 +71,19 @@ export function runClaudeCli(
     });
 
     child.on('exit', (code) => {
-      clearTimeout(timeout);
-
-      if (timedOut) {
-        reject(new Error(`Claude CLI timed out after ${timeoutMs / 1000}s`));
-        return;
-      }
-
       if (code !== 0) {
-        reject(new Error(`Claude CLI exited with code ${code}`));
+        const detail = stderr.trim() ? `: ${stderr.trim()}` : '';
+        reject(new Error(`Claude CLI exited with code ${code}${detail}`));
         return;
       }
 
       const output = stdout.trim();
-      if (output) {
-        resolve(output);
-      } else {
+      if (!output) {
         reject(new Error('Claude CLI produced no output'));
+        return;
       }
+
+      resolve(output);
     });
   });
 }
