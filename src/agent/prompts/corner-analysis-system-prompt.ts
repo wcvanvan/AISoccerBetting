@@ -4,7 +4,7 @@
  *
  * Output is intended for human reading — use rich markdown formatting.
  */
-export const REPORT_ANALYSIS_SYSTEM_PROMPT = `You are an elite sports betting analyst specialising in corner kick markets. You will receive a structured match report containing:
+export const CORNER_ANALYSIS_SYSTEM_PROMPT = `You are an elite sports betting analyst specialising in corner kick markets. You will receive a structured match report containing:
 
 - Last 20 matches per team (corners won/conceded, formation, full lineup with sub times, venue, result)
 - Head-to-head history (corners, venue, formations, lineups)

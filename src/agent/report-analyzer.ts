@@ -6,6 +6,8 @@
  *   - "api"  — LangChain agent with Claude Opus + optional Tavily web search
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { createAgent } from 'langchain';
 import { ChatAnthropic } from '@langchain/anthropic';
 import { TavilySearch } from '@langchain/tavily';
@@ -13,11 +15,17 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { configureAnthropicProxy } from './configure-proxy';
 import { stripCodeFences } from './strip-code-fences';
 import { extractTextContent } from './extract-content';
-import { runClaudeCli, ClaudeCliOptions } from './claude-cli';
+import { runClaudeCli } from './claude-cli';
 import { config } from '../config';
-import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './prompts/report-analysis-system-prompt';
+import { CORNER_ANALYSIS_SYSTEM_PROMPT } from './prompts/corner-analysis-system-prompt';
 
 const PROGRESS_INTERVAL_SEC = 60;
+
+export interface AnalyzeReportOptions {
+  onLog?: (line: string) => void;
+  /** If set, stream CLI output to this file path incrementally (for live monitoring) */
+  outputPath?: string;
+}
 
 /**
  * Analyse a match report markdown string and return a human-readable
@@ -28,9 +36,9 @@ const PROGRESS_INTERVAL_SEC = 60;
 export async function analyzeReport(
   report: string,
   systemPrompt?: string,
-  opts?: { onLog?: (line: string) => void },
+  opts?: AnalyzeReportOptions,
 ): Promise<string> {
-  const prompt = systemPrompt ?? REPORT_ANALYSIS_SYSTEM_PROMPT;
+  const prompt = systemPrompt ?? CORNER_ANALYSIS_SYSTEM_PROMPT;
 
   if (config.llmMode === 'cli') {
     return analyzeViaCli(report, prompt, opts);
@@ -43,25 +51,33 @@ export async function analyzeReport(
 async function analyzeViaCli(
   report: string,
   systemPrompt: string,
-  opts?: { onLog?: (line: string) => void },
+  opts?: AnalyzeReportOptions,
 ): Promise<string> {
-  const timeoutSec = config.analysis.timeoutSec;
   const cliPrompt = [systemPrompt, '', '---', '', report].join('\n');
 
   const log = opts?.onLog ?? ((msg: string) => console.error(msg));
-  log(`  Analysis via Claude CLI (timeout ${timeoutSec}s)...`);
+  log(`  Analysis via Claude CLI (no timeout)...`);
+  if (opts?.outputPath) {
+    log(`  Streaming output to ${opts.outputPath} — tail -f to monitor`);
+  }
   const startMs = Date.now();
 
-  const cliOpts: ClaudeCliOptions = {
-    timeoutMs: timeoutSec * 1000,
-    onLog: opts?.onLog,
-  };
+  const progress = setInterval(() => {
+    const elapsed = Math.round((Date.now() - startMs) / 1000);
+    log(`  Analysis in progress... ${elapsed}s elapsed`);
+  }, PROGRESS_INTERVAL_SEC * 1000);
 
-  const result = await runClaudeCli(cliPrompt, cliOpts);
-  const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-  log(`  Analysis completed in ${elapsed}s`);
-
-  return stripCodeFences(result);
+  try {
+    const result = await runClaudeCli(cliPrompt, {
+      onLog: opts?.onLog,
+      outputPath: opts?.outputPath,
+    });
+    return stripCodeFences(result);
+  } finally {
+    clearInterval(progress);
+    const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
+    log(`  Analysis completed in ${elapsed}s`);
+  }
 }
 
 // ── API mode ────────────────────────────────────────────────────────────────
@@ -69,7 +85,7 @@ async function analyzeViaCli(
 async function analyzeViaApi(
   report: string,
   systemPrompt: string,
-  opts?: { onLog?: (line: string) => void },
+  opts?: AnalyzeReportOptions,
 ): Promise<string> {
   const apiKey = config.anthropicApiKey;
   if (!apiKey) {
@@ -97,69 +113,102 @@ async function analyzeViaApi(
     new HumanMessage(report),
   ];
 
-  const timeoutSec = config.analysis.timeoutSec;
-  const content = await withTimeoutAndProgress(
-    () => invokeModel(llm, messages, hasTavily),
-    timeoutSec,
-    opts?.onLog,
-  );
-
-  const text = extractTextContent(content);
-  if (!text) throw new Error('Analysis returned no text content.');
-  return stripCodeFences(text);
-}
-
-// ── Internals ────────────────────────────────────────────────────────────────
-
-async function invokeModel(
-  llm: ChatAnthropic,
-  messages: Array<SystemMessage | HumanMessage>,
-  hasTavily: boolean,
-): Promise<unknown> {
-  if (hasTavily) {
-    const tavilyTool = new TavilySearch({ maxResults: 5 });
-    const agent = createAgent({ model: llm, tools: [tavilyTool] });
-    const result = await agent.invoke({ messages });
-    const msgs: Array<{ content?: unknown }> = result.messages ?? [];
-    return msgs[msgs.length - 1]?.content;
+  const log = opts?.onLog ?? ((msg: string) => console.error(msg));
+  log(`  Analysis via API (no timeout)...`);
+  if (opts?.outputPath) {
+    log(`  Streaming output to ${opts.outputPath} — tail -f to monitor`);
   }
-  const result = await llm.invoke(messages);
-  return result.content;
-}
-
-async function withTimeoutAndProgress<T>(
-  fn: () => Promise<T>,
-  timeoutSec: number,
-  onLog?: (line: string) => void,
-): Promise<T> {
-  const log = onLog ?? ((msg: string) => console.error(msg));
   const startMs = Date.now();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const progress = setInterval(() => {
     const elapsed = Math.round((Date.now() - startMs) / 1000);
-    const remaining = timeoutSec - elapsed;
-    if (remaining > 0) {
-      log(`  Analysis in progress... ${elapsed}s elapsed (timeout in ${remaining}s)`);
-    }
+    log(`  Analysis in progress... ${elapsed}s elapsed`);
   }, PROGRESS_INTERVAL_SEC * 1000);
 
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(
-        `Analysis timed out after ${timeoutSec}s. ` +
-        `Increase ANALYSIS_TIMEOUT in .env (current: ${timeoutSec}s) or check your network/proxy.`
-      ));
-    }, timeoutSec * 1000);
-  });
-
   try {
-    const result = await Promise.race([fn(), timeout]);
-    return result;
+    let text: string;
+
+    if (hasTavily) {
+      // Agent path — tool calls make chunk-level streaming complex; write result at end
+      const content = await invokeAgent(llm, messages);
+      text = extractTextContent(content);
+      if (opts?.outputPath && text) {
+        ensureDir(opts.outputPath);
+        fs.writeFileSync(opts.outputPath, text, 'utf8');
+      }
+    } else {
+      // Direct LLM — stream chunks to file in real-time
+      text = await streamModel(llm, messages, opts?.outputPath);
+    }
+
+    if (!text) throw new Error('Analysis returned no text content.');
+    return stripCodeFences(text);
   } finally {
     clearInterval(progress);
-    if (timeoutId) clearTimeout(timeoutId);
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
     log(`  Analysis completed in ${elapsed}s`);
   }
 }
+
+// ── Internals ────────────────────────────────────────────────────────────────
+
+function ensureDir(filePath: string): void {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+/** Extract text deltas from a streaming chunk's content (skips thinking blocks). */
+function extractChunkText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (b): b is { type: string; text: string } =>
+          typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text'
+      )
+      .map(b => b.text)
+      .join('');
+  }
+  return '';
+}
+
+/** Stream LLM response, writing text chunks to outputPath if provided. */
+async function streamModel(
+  llm: ChatAnthropic,
+  messages: Array<SystemMessage | HumanMessage>,
+  outputPath?: string,
+): Promise<string> {
+  let outStream: fs.WriteStream | undefined;
+  if (outputPath) {
+    ensureDir(outputPath);
+    outStream = fs.createWriteStream(outputPath, { flags: 'w' });
+  }
+
+  let fullText = '';
+  try {
+    const stream = await llm.stream(messages);
+    for await (const chunk of stream) {
+      const delta = extractChunkText(chunk.content);
+      if (delta) {
+        fullText += delta;
+        if (outStream) outStream.write(delta);
+      }
+    }
+  } finally {
+    if (outStream) outStream.end();
+  }
+  return fullText;
+}
+
+/** Invoke LLM via agent (with Tavily tools). */
+async function invokeAgent(
+  llm: ChatAnthropic,
+  messages: Array<SystemMessage | HumanMessage>,
+): Promise<unknown> {
+  const tavilyTool = new TavilySearch({ maxResults: 5 });
+  const agent = createAgent({ model: llm, tools: [tavilyTool] });
+  const result = await agent.invoke({ messages });
+  const msgs: Array<{ content?: unknown }> = result.messages ?? [];
+  return msgs[msgs.length - 1]?.content;
+}
+

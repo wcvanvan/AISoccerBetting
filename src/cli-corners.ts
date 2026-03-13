@@ -9,11 +9,11 @@ bootstrapEnv();
 
 import { runPipeline } from './cli-shared';
 import { CORNER_MARKET_CONFIG } from './odds';
-import { REPORT_ANALYSIS_SYSTEM_PROMPT } from './agent';
+import { CORNER_ANALYSIS_SYSTEM_PROMPT } from './agent';
 
 runPipeline({
   marketConfig: CORNER_MARKET_CONFIG,
-  analysisPrompt: REPORT_ANALYSIS_SYSTEM_PROMPT,
+  analysisPrompt: CORNER_ANALYSIS_SYSTEM_PROMPT,
   formatOptions: { showCorners: true, oddsLabel: 'Corner' },
   toolName: 'corners',
   marketLabel: 'Corner',

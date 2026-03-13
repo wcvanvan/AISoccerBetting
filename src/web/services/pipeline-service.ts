@@ -20,7 +20,7 @@ import { buildReportFilename, buildNewsFilename } from '../../utils/report-namin
 import {
   runMatchNews,
   analyzeReport,
-  REPORT_ANALYSIS_SYSTEM_PROMPT,
+  CORNER_ANALYSIS_SYSTEM_PROMPT,
   GOAL_ANALYSIS_SYSTEM_PROMPT,
   CARD_ANALYSIS_SYSTEM_PROMPT,
 } from '../../agent';
@@ -41,7 +41,7 @@ const MARKET_CONFIGS: Record<MarketType, MarketPipelineConfig> = {
     formatOptions: { showCorners: true, oddsLabel: 'Corner' },
     toolName: 'corners',
     marketLabel: 'corner',
-    analysisPrompt: REPORT_ANALYSIS_SYSTEM_PROMPT,
+    analysisPrompt: CORNER_ANALYSIS_SYSTEM_PROMPT,
   },
   goals: {
     marketConfig: GOAL_MARKET_CONFIG,
@@ -199,9 +199,13 @@ async function runAnalysis(job: Job): Promise<void> {
   const analysis = await analyzeReport(
     reportContent,
     config.analysisPrompt,
-    { onLog: (line) => jobManager.addLog(job.id, line) },
+    {
+      onLog: (line) => jobManager.addLog(job.id, line),
+      outputPath: analysisPath,
+    },
   );
 
+  // CLI mode already streams to the file; write final result to ensure completeness
   fs.writeFileSync(analysisPath, analysis, 'utf8');
   job.analysisPath = analysisPath;
   jobManager.setComplete(job.id);
