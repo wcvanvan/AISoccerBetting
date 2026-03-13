@@ -14,7 +14,7 @@ Required keys in `.env`:
 - `THE_ODDS_API_KEY` — [the-odds-api.com](https://the-odds-api.com) (for odds markets)
 
 Optional (for API-based analysis/news — not needed with Claude Code subagents):
-- `ANTHROPIC_API_KEY` — [console.anthropic.com](https://console.anthropic.com)
+- `CLAUDE_API_KEY` — [console.anthropic.com](https://console.anthropic.com)
 - `TAVILY_API_KEY` — free tier at [app.tavily.com](https://app.tavily.com)
 
 ## Web UI
@@ -63,7 +63,7 @@ npm run cards:analyze <report.md>
 
 Reads an existing report and runs Claude Opus analysis. Writes `{slug}-{market}-analysis.md`.
 
-When running from Claude Code, analysis and news collection can use subagents instead of API calls (no ANTHROPIC_API_KEY needed).
+When running from Claude Code, analysis and news collection can use subagents instead of API calls (no CLAUDE_API_KEY needed).
 
 ### Fetch match news
 
@@ -103,7 +103,7 @@ Non-secret defaults live in `.env.defaults` (committed). Secrets go in `.env` (g
 | Variable | Purpose |
 |----------|---------|
 | `THE_ODDS_API_KEY` | Betting odds (required for odds) |
-| `ANTHROPIC_API_KEY` | Claude API for analysis/news |
+| `CLAUDE_API_KEY` | Claude API for analysis/news |
 | `TAVILY_API_KEY` | Web search for match news |
 | `WEB_ADMIN_PASSWORD` | Web UI admin login |
 | `WEB_READER_PASSWORD` | Web UI read-only login |

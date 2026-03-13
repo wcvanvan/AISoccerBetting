@@ -63,7 +63,7 @@ export const config = {
   },
 
   get anthropicApiKey(): string | undefined {
-    return optionalEnv('ANTHROPIC_API_KEY');
+    return optionalEnv('CLAUDE_API_KEY');
   },
 
   get tavilyApiKey(): string | undefined {

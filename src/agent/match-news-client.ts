@@ -4,7 +4,7 @@
  * so it can fetch real-time match news, lineups, and absences from the web.
  *
  * Requires in .env:
- *   ANTHROPIC_API_KEY    – for Claude
+ *   CLAUDE_API_KEY    – for Claude
  *   WEB_SEARCH_MODEL      – Claude model to use
  *   TAVILY_API_KEY       – for Tavily web search (free tier at app.tavily.com)
  * Optional:
@@ -36,7 +36,7 @@ export async function runMatchNews(
 ): Promise<string> {
   const apiKey = config.anthropicApiKey;
   if (!apiKey) {
-    throw new Error('Set ANTHROPIC_API_KEY in .env to fetch match news.');
+    throw new Error('Set CLAUDE_API_KEY in .env to fetch match news.');
   }
   if (!config.tavilyApiKey) {
     throw new Error('Set TAVILY_API_KEY in .env for web search (free key at app.tavily.com).');
