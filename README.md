@@ -20,16 +20,12 @@ Optional (for API-based analysis/news — not needed with Claude Code subagents)
 ## Web UI
 
 ```bash
-npm run web
+npm run web      # build + serve locally at http://localhost:3001
 ```
 
-Starts a Fastify server at `http://localhost:3000`. The web dashboard is the primary way to use the tool — browse upcoming matches, run analysis pipelines, and review results all from the browser.
+Displays pre-generated analysis reports. No server or authentication — just HTML files built from the markdown reports in `data/reports/`.
 
-Two roles are supported:
-- **Admin** — can launch data collection and analysis jobs
-- **Reader** — read-only access to cached results
-
-Configure credentials via `WEB_ADMIN_PASSWORD` / `WEB_READER_PASSWORD` in `.env` (see `.env.example`).
+Deployed to Vercel automatically via `git push` (runs `vercel-build` → `npm run build`).
 
 ## Markets
 
@@ -105,8 +101,6 @@ Non-secret defaults live in `.env.defaults` (committed). Secrets go in `.env` (g
 | `THE_ODDS_API_KEY` | Betting odds (required for odds) |
 | `CLAUDE_API_KEY` | Claude API for analysis/news |
 | `TAVILY_API_KEY` | Web search for match news |
-| `WEB_ADMIN_PASSWORD` | Web UI admin login |
-| `WEB_READER_PASSWORD` | Web UI read-only login |
 | `ANALYSIS_MODEL` | Claude model for analysis (default: claude-opus-4-6) |
 | `WEB_SEARCH_MODEL` | Claude model for news (default: claude-sonnet-4-6) |
 

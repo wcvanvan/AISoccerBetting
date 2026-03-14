@@ -9,6 +9,7 @@
 
 import { spawn } from 'child_process';
 import * as path from 'path';
+import { config } from '../config';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
@@ -34,9 +35,15 @@ export function runClaudeCli(
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
+    const model = config.analysis.model;
     const child = spawn(
       'claude',
-      ['--print', '--output-format', 'text'],
+      [
+        '--print', '--output-format', 'text',
+        '--model', model,
+        '--effort', 'high',
+        '--tools', '',
+      ],
       {
         cwd: PROJECT_ROOT,
         env,

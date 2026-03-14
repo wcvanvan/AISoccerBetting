@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-TypeScript CLI + web UI for multi-market soccer betting analysis (corners, goals, cards). Three data pipelines produce a data report, then an analysis agent identifies value bets.
+TypeScript CLI + web dashboard for multi-market soccer betting analysis (corners, goals, cards). Three data pipelines produce a data report, then an analysis agent identifies value bets.
 
 **Data collection** (parallel):
 
@@ -37,15 +37,12 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
      +-- analyzeReport (src/agent/) [if ANALYSIS_ENABLED=true]
           +-- Claude Opus + optional Tavily -> {slug}-analysis.md
 
-Web UI (src/cli-web.ts -> src/web/server.ts)
+Web (scripts/build-web.ts -> dist/)
  |
- +-- Fastify + @fastify/static (src/web/public/)
- +-- Auth (session cookies, env-configured users)
- +-- Routes: /api/events, /api/analysis, /api/reports
- +-- Services:
-      +-- event-service: Odds API event listing (30-min cache)
-      +-- pipeline-service: data collection + analysis
-      +-- job-manager: serial job queue with SSE progress streaming
+ +-- Scans data/reports/ -> dist/data/manifest.json
+ +-- Converts markdown -> pre-rendered HTML (via marked)
+ +-- Copies public/ assets (index.html, app.js, style.css)
+ +-- Frontend fetches manifest.json + pre-rendered HTML files
 ```
 
 Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
@@ -81,13 +78,15 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 - `match-news-client.ts` — LangChain agent (Claude + Tavily tool), collects confirmed absences and tactical news only.
 - Failure is non-fatal: logged to stderr, report continues without news section.
 
-### Web UI (src/web/)
+### Web (public/, scripts/build-web.ts)
 
-- Fastify server with vanilla HTML/CSS/JS frontend (no framework), dark theme.
-- Session-based auth with env-configured users (admin = full access, reader = view cached results only; History nav hidden for readers).
-- Matches page: date-paged view with pill navigation (keyboard left/right), matches grouped by league per date. Data merged from Odds API + history reports. Auto-lands on today or nearest future date.
-- Job queue: max 1 concurrent, with SSE progress streaming.
-- Reports stored in `data/reports/` with `meta.json` for league metadata.
+- Built at build time — no server, no auth, no dynamic content.
+- Build script (`scripts/build-web.ts`) scans `data/reports/` subdirectories, generates `dist/data/manifest.json` with match/market metadata, converts markdown to HTML via `marked`, copies `public/` assets to `dist/`.
+- Vanilla HTML/CSS/JS frontend (no framework), dark theme.
+- Matches page: date-paged view with pill navigation (keyboard left/right), matches grouped by league per date. Auto-lands on today or nearest future date.
+- Match detail: market tabs (goals/corners/cards) with sub-tabs (Value Picks / Full Analysis / Data Report).
+- Reports stored in `data/reports/{matchDir}/` with `meta.json` for league metadata.
+- Deployed to Vercel (`vercel.json` → `outputDirectory: dist`).
 
 ## Output files
 
@@ -101,4 +100,4 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 - **No inline values**: never hardcode prompts, env var names, or configuration values inline in consuming code. Always define them in a centralized module and import from there. System prompts live in `src/agent/prompts/`, market configs in `src/odds/market-config.ts`, etc.
 
 ## Known limitations
-- **Web UI auth**: simple session-based auth, not suitable for public deployment without additional hardening.
+- **Team name display**: `unslug()` fallback produces approximate names (e.g. "Borussia Monchengladbach" without umlaut). Accurate names require a markdown H1 title line or `meta.json`.
