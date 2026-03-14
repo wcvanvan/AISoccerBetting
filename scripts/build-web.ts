@@ -101,7 +101,7 @@ function scanReports(): ManifestEntry[] {
 
     let homeTeam = unslug(homeSlug);
     let awayTeam = unslug(awaySlug);
-    const firstReport = files.find((f) => filePattern.test(f) && !f.includes('-analysis'));
+    const firstReport = files.find((f) => !f.includes('-analysis'));
     if (firstReport) {
       const parsed = parseTitle(readFirstLine(path.join(dirPath, firstReport)));
       if (parsed) { homeTeam = parsed.home; awayTeam = parsed.away; }
@@ -115,7 +115,9 @@ function scanReports(): ManifestEntry[] {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
         leagueKey = meta.leagueKey || '';
         leagueLabel = meta.leagueLabel || '';
-      } catch {}
+      } catch (e) {
+        console.warn(`Warning: failed to parse ${metaPath}: ${(e as Error).message}`);
+      }
     }
 
     const match: ManifestEntry = {
@@ -215,7 +217,8 @@ function main(): void {
         let fp = path.resolve(DIST_DIR, '.' + path.normalize(raw));
         if (!fp.startsWith(DIST_DIR)) { res.writeHead(403); res.end(); return; }
         if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) fp = path.join(DIST_DIR, 'index.html');
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'text/html' });
+        const ct = MIME[path.extname(fp)] || 'text/html';
+        res.writeHead(200, { 'Content-Type': ct + '; charset=utf-8' });
         res.end(fs.readFileSync(fp));
       } catch {
         res.writeHead(500); res.end();

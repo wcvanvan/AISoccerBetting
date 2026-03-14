@@ -699,17 +699,16 @@ main { padding: 20px 0; }
   padding: 5px 12px;
 }
 
-.match-time-cell {
-  width: 56px;
-  font-size: 13px;
-  color: var(--text-dim);
-  font-family: var(--mono);
-  font-weight: 500;
-}
-
 /* ── Right-aligned columns ─────────────────────────────────────────────── */
 .col-right {
   text-align: right;
+}
+
+/* ── Focus-visible (keyboard accessibility) ────────────────────────────── */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
@@ -737,5 +736,4 @@ main { padding: 20px 0; }
   .container { padding: 0 16px; }
   .date-pill { padding: 5px 10px; min-width: 44px; }
   .date-pill-num { font-size: 14px; }
-  .match-time-cell { width: 40px; }
 }
