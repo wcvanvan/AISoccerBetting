@@ -7,6 +7,7 @@ let eventsData = [];
 let currentMatch = null; // { home_team, away_team, date, league_key, league_label, commence_time, markets }
 let currentMarket = 'goals';
 let tabCache = {};
+let currentLeagueFilter = 'all';
 
 // ── Page navigation ─────────────────────────────────────────────────────────
 
@@ -66,8 +67,23 @@ async function loadEvents() {
       groupMap[dateKey].events.push(e);
     });
 
-    // Find today's page (or nearest future)
-    var todayStr = new Date().toISOString().slice(0, 10);
+    // Ensure today always exists in datePages
+    var now = new Date(); var todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    if (!groupMap[todayStr]) {
+      var todayPage = { date: todayStr, events: [] };
+      // Insert in sorted position
+      var inserted = false;
+      for (var j = 0; j < datePages.length; j++) {
+        if (datePages[j].date > todayStr) {
+          datePages.splice(j, 0, todayPage);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) datePages.push(todayPage);
+    }
+
+    // Find today's page
     currentDateIdx = datePages.length - 1;
     for (var i = 0; i < datePages.length; i++) {
       if (datePages[i].date >= todayStr) {
@@ -87,7 +103,7 @@ async function loadEvents() {
 function renderDatePills() {
   var container = document.getElementById('date-pills');
   container.innerHTML = '';
-  var todayStr = new Date().toISOString().slice(0, 10);
+  var now = new Date(); var todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
 
   datePages.forEach(function (page, idx) {
     var pill = document.createElement('button');
@@ -95,9 +111,22 @@ function renderDatePills() {
     var d = new Date(page.date + 'T12:00:00Z');
     var dayName = d.toLocaleDateString('en-GB', { weekday: 'short' });
     var dayNum = d.getUTCDate();
-    pill.innerHTML = '<span class="date-pill-day">' + dayName + '</span>' +
-      '<span class="date-pill-num">' + dayNum + '</span>';
-    if (page.date === todayStr) pill.classList.add('today');
+    if (page.date === todayStr) {
+      pill.classList.add('today');
+      var todayLabel = document.createElement('span');
+      todayLabel.className = 'date-pill-today';
+      todayLabel.textContent = 'Today';
+      pill.appendChild(todayLabel);
+    } else {
+      var daySpan = document.createElement('span');
+      daySpan.className = 'date-pill-day';
+      daySpan.textContent = dayName;
+      pill.appendChild(daySpan);
+    }
+    var numSpan = document.createElement('span');
+    numSpan.className = 'date-pill-num';
+    numSpan.textContent = dayNum;
+    pill.appendChild(numSpan);
     pill.addEventListener('click', function () { goToDate(idx); });
     container.appendChild(pill);
   });
@@ -119,9 +148,47 @@ function flipDate(dir) {
 
 function goToDate(idx) {
   currentDateIdx = idx;
+  currentLeagueFilter = 'all';
   renderDatePills();
   renderDatePage();
 }
+
+// ── League filter bar ───────────────────────────────────────────────────────
+
+function renderLeagueFilterBar(leagueGroups) {
+  var filterBar = document.getElementById('league-filter');
+  filterBar.innerHTML = '';
+
+  if (leagueGroups.length <= 1) {
+    filterBar.style.display = 'none';
+    return;
+  }
+
+  filterBar.style.display = '';
+
+  // "All" pill
+  var allPill = document.createElement('button');
+  allPill.className = 'league-filter-pill' + (currentLeagueFilter === 'all' ? ' active' : '');
+  allPill.textContent = 'All';
+  allPill.addEventListener('click', function () {
+    currentLeagueFilter = 'all';
+    renderDatePage();
+  });
+  filterBar.appendChild(allPill);
+
+  leagueGroups.forEach(function (lg) {
+    var pill = document.createElement('button');
+    pill.className = 'league-filter-pill' + (currentLeagueFilter === lg.key ? ' active' : '');
+    pill.textContent = lg.label;
+    pill.addEventListener('click', function () {
+      currentLeagueFilter = lg.key;
+      renderDatePage();
+    });
+    filterBar.appendChild(pill);
+  });
+}
+
+// ── Date page rendering ─────────────────────────────────────────────────────
 
 function renderDatePage() {
   var container = document.getElementById('events-container');
@@ -133,16 +200,37 @@ function renderDatePage() {
 
   container.innerHTML = '';
 
-  // Date heading
-  var todayStr = new Date().toISOString().slice(0, 10);
+  var now = new Date(); var todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
   var d = new Date(page.date + 'T12:00:00Z');
+  var isToday = page.date === todayStr;
+
+  // Date heading
   var heading = document.createElement('div');
   heading.className = 'date-page-heading';
-  var label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  if (page.date === todayStr) label += ' — Today';
-  heading.innerHTML = '<span class="date-page-label">' + esc(label) + '</span>' +
-    '<span class="date-page-count">' + page.events.length + ' match' + (page.events.length !== 1 ? 'es' : '') + '</span>';
-  container.appendChild(heading);
+  var label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  if (isToday) label += ' — Today';
+
+  var labelSpan = document.createElement('span');
+  labelSpan.className = 'date-page-label';
+  labelSpan.textContent = label;
+  heading.appendChild(labelSpan);
+
+  // Empty day — only today gets an empty state card
+  if (page.events.length === 0 && isToday) {
+    container.appendChild(heading);
+    var emptyCard = document.createElement('div');
+    emptyCard.className = 'empty-day-card';
+    var emptyIcon = document.createElement('div');
+    emptyIcon.className = 'empty-day-icon';
+    emptyIcon.textContent = '\u26BD';
+    emptyCard.appendChild(emptyIcon);
+    var emptyTitle = document.createElement('h3');
+    emptyTitle.textContent = 'No analysis scheduled today';
+    emptyCard.appendChild(emptyTitle);
+    container.appendChild(emptyCard);
+    document.getElementById('league-filter').style.display = 'none';
+    return;
+  }
 
   // Group events by league
   var leagueGroups = [];
@@ -160,9 +248,34 @@ function renderDatePage() {
     }
   });
 
-  leagueGroups.forEach(function (lg) { renderLeagueSection(container, lg.key, lg.label, lg.events); });
-  if (noLeague.length > 0) renderLeagueSection(container, '', 'Other', noLeague);
+  // Render league filter bar
+  renderLeagueFilterBar(leagueGroups);
+
+  var totalEvents = page.events.length;
+  if (currentLeagueFilter !== 'all') {
+    var filtered = leagueGroups.filter(function (lg) { return lg.key === currentLeagueFilter; });
+    totalEvents = filtered.reduce(function (sum, lg) { return sum + lg.events.length; }, 0);
+  }
+
+  var countSpan = document.createElement('span');
+  countSpan.className = 'date-page-count';
+  countSpan.textContent = totalEvents + ' match' + (totalEvents !== 1 ? 'es' : '');
+  heading.appendChild(countSpan);
+  container.appendChild(heading);
+
+  // Apply league filter
+  var filteredGroups = leagueGroups;
+  var filteredNoLeague = noLeague;
+  if (currentLeagueFilter !== 'all') {
+    filteredGroups = leagueGroups.filter(function (lg) { return lg.key === currentLeagueFilter; });
+    filteredNoLeague = [];
+  }
+
+  filteredGroups.forEach(function (lg) { renderLeagueSection(container, lg.key, lg.label, lg.events); });
+  if (filteredNoLeague.length > 0) renderLeagueSection(container, '', 'Other', filteredNoLeague);
 }
+
+// ── League section with table rows ──────────────────────────────────────────
 
 function renderLeagueSection(container, leagueKey, leagueLabel, events) {
   var section = document.createElement('div');
@@ -239,7 +352,10 @@ function renderInlineMarketBadges(cell, markets) {
     }
   });
   if (!hasSome) {
-    cell.innerHTML = '<span class="cache-none">&mdash;</span>';
+    var dash = document.createElement('span');
+    dash.className = 'cache-none';
+    dash.textContent = '\u2014';
+    cell.appendChild(dash);
   }
 }
 
@@ -290,16 +406,34 @@ function renderMatchPage() {
   // Match info card
   const infoCard = document.createElement('div');
   infoCard.className = 'match-info-card';
-  infoCard.innerHTML =
-    '<div class="match-info-teams">' +
-    '  <span class="match-info-team">' + esc(m.home_team) + '</span>' +
-    '  <span class="match-info-vs">vs</span>' +
-    '  <span class="match-info-team">' + esc(m.away_team) + '</span>' +
-    '</div>' +
-    '<div class="match-info-details">' +
-    '  <span>' + esc(dateStr) + (timeStr !== '00:00' ? ' &middot; ' + esc(timeStr) : '') + '</span>' +
-    (m.league_label ? '  <span class="league-badge" data-league="' + esc(m.league_key) + '">' + esc(m.league_label) + '</span>' : '') +
-    '</div>';
+
+  const teamsRow = document.createElement('div');
+  teamsRow.className = 'match-info-teams';
+  var homeTeam = document.createElement('span');
+  homeTeam.className = 'match-info-team';
+  homeTeam.textContent = m.home_team;
+  var vsEl = document.createElement('span');
+  vsEl.className = 'match-info-vs';
+  vsEl.textContent = 'vs';
+  var awayTeam = document.createElement('span');
+  awayTeam.className = 'match-info-team';
+  awayTeam.textContent = m.away_team;
+  teamsRow.append(homeTeam, vsEl, awayTeam);
+  infoCard.appendChild(teamsRow);
+
+  const detailsRow = document.createElement('div');
+  detailsRow.className = 'match-info-details';
+  var dateSpan = document.createElement('span');
+  dateSpan.textContent = dateStr + (timeStr !== '00:00' ? ' \u00b7 ' + timeStr : '');
+  detailsRow.appendChild(dateSpan);
+  if (m.league_label) {
+    var leagueBadge = document.createElement('span');
+    leagueBadge.className = 'league-badge';
+    leagueBadge.dataset.league = m.league_key;
+    leagueBadge.textContent = m.league_label;
+    detailsRow.appendChild(leagueBadge);
+  }
+  infoCard.appendChild(detailsRow);
   container.appendChild(infoCard);
 
   // Market tabs
@@ -347,7 +481,13 @@ function loadMarketData() {
     return;
   }
 
-  resultsArea.innerHTML = '<div class="empty-state"><p>No data collected yet for ' + currentMarket + ' market.</p></div>';
+  var emptyDiv = document.createElement('div');
+  emptyDiv.className = 'empty-state';
+  var emptyP = document.createElement('p');
+  emptyP.textContent = 'No data collected yet for ' + currentMarket + ' market.';
+  emptyDiv.appendChild(emptyP);
+  resultsArea.innerHTML = '';
+  resultsArea.appendChild(emptyDiv);
 }
 
 function renderMatchCachedResults(match, market, hasAnalysis) {
@@ -372,11 +512,25 @@ async function loadReportTab(container, url, cacheKey) {
     return;
   }
 
-  container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+  container.innerHTML = '';
+  var loadingDiv = document.createElement('div');
+  loadingDiv.className = 'loading';
+  var spinner = document.createElement('span');
+  spinner.className = 'spinner';
+  loadingDiv.appendChild(spinner);
+  loadingDiv.appendChild(document.createTextNode(' Loading...'));
+  container.appendChild(loadingDiv);
+
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
-      container.innerHTML = '<div class="empty-state"><p>Report not found</p></div>';
+      container.innerHTML = '';
+      var errDiv = document.createElement('div');
+      errDiv.className = 'empty-state';
+      var errP = document.createElement('p');
+      errP.textContent = 'Report not found';
+      errDiv.appendChild(errP);
+      container.appendChild(errDiv);
       return;
     }
     const html = await resp.text();
@@ -387,7 +541,13 @@ async function loadReportTab(container, url, cacheKey) {
     body.innerHTML = html;
     container.appendChild(body);
   } catch (err) {
-    container.innerHTML = '<div class="empty-state"><p>Failed to load: ' + esc(err.message) + '</p></div>';
+    container.innerHTML = '';
+    var failDiv = document.createElement('div');
+    failDiv.className = 'empty-state';
+    var failP = document.createElement('p');
+    failP.textContent = 'Failed to load: ' + err.message;
+    failDiv.appendChild(failP);
+    container.appendChild(failDiv);
   }
 }
 

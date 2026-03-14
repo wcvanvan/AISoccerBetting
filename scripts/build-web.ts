@@ -45,33 +45,12 @@ function parseTitle(line: string): { home: string; away: string } | null {
 function extractValuePicks(markdown: string): string {
   const lines = markdown.split('\n');
 
-  const outputIdx = lines.findIndex((l) => /^#{1,3}\s*(phase\s*4|output)/i.test(l));
-  if (outputIdx >= 0) return lines.slice(outputIdx).join('\n');
+  // Primary: find "Value Picks" heading (always present per system prompt)
+  const idx = lines.findIndex((l) => /^#{1,4}\s*.*value\s*picks/i.test(l));
+  if (idx >= 0) return lines.slice(idx).join('\n');
 
-  const pickPatterns = [
-    /^#{1,4}\s*.*value\s*picks/i,
-    /^#{1,4}\s*.*recommended\s*(bets|plays|wagers)/i,
-    /^#{1,4}\s*.*top\s*picks/i,
-    /^#{1,4}\s*.*best\s*bets/i,
-    /^#{1,4}\s*.*final\s*recommendations/i,
-    /^#{1,4}\s*.*betting\s*recommendations/i,
-    /^#{1,4}\s*.*predictions/i,
-  ];
-
-  for (const pattern of pickPatterns) {
-    const idx = lines.findIndex((l) => pattern.test(l));
-    if (idx >= 0) {
-      let startIdx = idx;
-      for (let i = idx - 1; i >= Math.max(0, idx - 30); i--) {
-        if (/^#{1,4}\s*(predictions|statistical\s*summary|summary)/i.test(lines[i])) {
-          startIdx = i;
-          break;
-        }
-      }
-      return lines.slice(startIdx).join('\n');
-    }
-  }
-
+  // Fallback: last 30% of content (should not happen — system prompt mandates Value Picks heading)
+  console.warn('extractValuePicks: no "Value Picks" heading found, using last 30% fallback');
   const cutoff = Math.max(0, Math.floor(lines.length * 0.7));
   return lines.slice(cutoff).join('\n');
 }
