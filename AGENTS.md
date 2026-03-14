@@ -88,6 +88,55 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 - Reports stored in `data/reports/{matchDir}/` with `meta.json` for league metadata.
 - Deployed to Vercel (`vercel.json` → `outputDirectory: dist`).
 
+## Build & Deploy
+
+```bash
+npm run web            # build + serve locally at http://localhost:3001
+```
+
+Vercel deployment: `git push` triggers auto-deploy. Vercel runs `vercel-build` → `npm run build`. Config in `vercel.json` (outputDirectory: `dist`, SPA fallback to `index.html`).
+
+To deploy manually: `vercel --prod --token $VERCEL_TOKEN` (token is in `.env`).
+
+## CLI Commands
+
+```bash
+# Full pipeline (collect data + generate report)
+npm run corners "TeamA" "TeamB" "YYYY-MM-DD"
+npm run goals "TeamA" "TeamB" "YYYY-MM-DD"
+npm run cards "TeamA" "TeamB" "YYYY-MM-DD"
+
+# Analyse an existing report
+npm run corners:analyze <report.md>
+npm run goals:analyze <report.md>
+npm run cards:analyze <report.md>
+
+# Fetch match news
+npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
+npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
+npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
+
+# Fetch odds
+npm run goals:odds "TeamA" "TeamB"   # specific match
+npm run goals:odds                    # list upcoming events
+
+# Test Claude API connection
+npm run test:connection
+```
+
+## Key Environment Variables
+
+Secrets go in `.env` (git-ignored). Non-secret defaults live in `.env.defaults` (committed).
+
+| Variable | Purpose |
+|----------|---------|
+| `THE_ODDS_API_KEY` | Betting odds (required for odds fetching) |
+| `CLAUDE_API_KEY` | Claude API for analysis/news |
+| `TAVILY_API_KEY` | Web search for match news |
+| `VERCEL_TOKEN` | Vercel deploy token (for manual deploys) |
+| `MATCH_NEWS_FETCHING` | When `true`, news collection is integrated into data pipelines. Otherwise news must be fetched separately via `:news` commands. |
+| `ANALYSIS_ENABLED` | When `true`, analysis runs automatically after data collection |
+
 ## Output files
 
 | File | Format | Purpose |
