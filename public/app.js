@@ -421,7 +421,13 @@ function renderMatchPage() {
   const detailsRow = document.createElement('div');
   detailsRow.className = 'match-info-details';
   const dateSpan = document.createElement('span');
-  dateSpan.textContent = dateStr;
+  if (m.commenceTime) {
+    const kickoff = new Date(m.commenceTime);
+    const timeStr = kickoff.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    dateSpan.textContent = dateStr + ' \u2014 ' + timeStr + ' (local)';
+  } else {
+    dateSpan.textContent = dateStr;
+  }
   detailsRow.appendChild(dateSpan);
   if (m.leagueLabel) {
     const leagueBadge = document.createElement('span');

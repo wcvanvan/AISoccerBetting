@@ -285,7 +285,7 @@ main { padding: 20px 0; }
   font-size: 15px;
   line-height: 1.8;
   color: var(--text);
-  max-width: 900px;
+  max-width: 100%;
 }
 
 .markdown-body h1 { font-size: 24px; margin: 28px 0 14px; font-weight: 700; letter-spacing: -0.3px; }

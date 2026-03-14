@@ -19,6 +19,10 @@ export interface MatchDataCollectorInput {
   teamA_name: string;
   teamB_name: string;
   match_date: string;
+  /** Pre-resolved Odds API event ID — skips event discovery when set */
+  eventId?: string;
+  /** Pre-resolved Odds API sport key — required when eventId is set */
+  sportKey?: string;
   /** Optional match news summary; when set, appended to report before Alerts */
   matchNewsSummary?: string;
 }
@@ -81,6 +85,8 @@ export class MatchDataCollector {
       teamA_name,
       teamB_name,
       match_date,
+      eventId: input.eventId,
+      sportKey: input.sportKey,
       matchNewsSummary: input.matchNewsSummary?.trim() || undefined,
     };
 
@@ -137,6 +143,8 @@ export class MatchDataCollector {
           ? this.oddsCollector.collectOdds(
               normalizedInput.teamA_name,
               normalizedInput.teamB_name,
+              normalizedInput.eventId,
+              normalizedInput.sportKey,
             )
           : Promise.resolve(undefined),
         canFetchSeasonStats

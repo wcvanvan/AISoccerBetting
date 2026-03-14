@@ -14,6 +14,23 @@ import { MarketConfig, CORNER_MARKET_CONFIG } from './market-config';
 
 const DEFAULT_SPORT_KEYS = ['soccer_epl', 'soccer_fa_cup', 'soccer_uefa_champs_league', 'soccer_france_ligue_one'];
 
+/** Maps Odds API sport_key → display labels for league metadata. */
+const LEAGUE_LABELS: Record<string, { key: string; label: string }> = {
+  soccer_epl: { key: 'soccer_epl', label: 'Premier League' },
+  soccer_fa_cup: { key: 'soccer_fa_cup', label: 'FA Cup' },
+  soccer_uefa_champs_league: { key: 'soccer_uefa_champs_league', label: 'Champions League' },
+  soccer_uefa_europa_league: { key: 'soccer_uefa_europa_league', label: 'Europa League' },
+  soccer_france_ligue_one: { key: 'soccer_france_ligue_one', label: 'Ligue 1' },
+  soccer_spain_la_liga: { key: 'soccer_spain_la_liga', label: 'La Liga' },
+  soccer_germany_bundesliga: { key: 'soccer_germany_bundesliga', label: 'Bundesliga' },
+  soccer_italy_serie_a: { key: 'soccer_italy_serie_a', label: 'Serie A' },
+  soccer_england_efl_cup: { key: 'soccer_england_efl_cup', label: 'EFL Cup' },
+};
+
+export function getLeagueLabel(sportKey: string): { key: string; label: string } {
+  return LEAGUE_LABELS[sportKey] ?? { key: sportKey, label: sportKey };
+}
+
 /** Strip accents, punctuation, and lowercase for matching. */
 /** Strip accents, replace punctuation with spaces, and collapse whitespace. */
 const norm = (s: string) =>
@@ -77,27 +94,63 @@ export class OddsCollector {
   /**
    * Generic entry point. Finds the event and returns odds for the configured markets.
    * Returns { found: false, markets: [] } gracefully on any failure.
+   * When eventId + sportKey are provided, skips discovery and fetches odds directly.
    */
   async collectOdds(
     teamA: string,
     teamB: string,
+    eventId?: string,
+    sportKey?: string,
   ): Promise<MatchOdds> {
     try {
-      const result = await this.findEvent(teamA, teamB);
-      if (!result) return { found: false, markets: [] };
+      let event: OddsEvent;
+      let resolvedSportKey: string;
 
-      const { event, sportKey } = result;
-      const markets = await this.fetchFilteredOdds(sportKey, event.id);
+      if (eventId && sportKey) {
+        // Caller already resolved the event — fetch odds directly
+        resolvedSportKey = sportKey;
+        event = { id: eventId, sport_key: sportKey, sport_title: '', home_team: teamA, away_team: teamB, commence_time: '' };
+      } else {
+        const result = await this.findEvent(teamA, teamB);
+        if (!result) return { found: false, markets: [] };
+        event = result.event;
+        resolvedSportKey = result.sportKey;
+      }
+
+      const markets = await this.fetchFilteredOdds(resolvedSportKey, event.id);
       return {
         found: true,
         homeTeam: event.home_team,
         awayTeam: event.away_team,
+        commenceTime: event.commence_time || undefined,
         markets,
       };
     } catch (err) {
       console.error(`Odds collection skipped: ${err instanceof Error ? err.message : err}`);
       return { found: false, markets: [] };
     }
+  }
+
+  /** Find ALL matching events across configured sport keys (for disambiguation). */
+  async findAllEvents(
+    teamA: string,
+    teamB: string
+  ): Promise<{ event: OddsEvent; sportKey: string }[]> {
+    const results: { event: OddsEvent; sportKey: string }[] = [];
+    for (const sportKey of resolveSportKeys()) {
+      let events: OddsEvent[];
+      try {
+        events = await this.client.getEvents(sportKey);
+      } catch {
+        continue;
+      }
+      for (const event of events) {
+        if (this.teamsMatch(event.home_team, event.away_team, teamA, teamB)) {
+          results.push({ event, sportKey });
+        }
+      }
+    }
+    return results;
   }
 
   /** Find an event by fuzzy team name match across configured sport keys. */

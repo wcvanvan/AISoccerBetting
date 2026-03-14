@@ -11,7 +11,9 @@ const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 import { configureAnthropicProxy } from './agent/configure-proxy';
 import { MatchDataCollector } from './collector';
 import { runMatchNews, analyzeReport } from './agent';
-import { OddsApiClient, OddsCollector, MarketConfig } from './odds';
+import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel } from './odds';
+import { OddsEvent } from './odds/types';
+import * as readline from 'readline';
 import { FormatOptions } from './formatter';
 import { SoccerdataProvider } from './provider';
 import { ChatAnthropic } from '@langchain/anthropic';
@@ -43,7 +45,6 @@ type CollectArgs = {
   mode: 'collect';
   teamA: string;
   teamB: string;
-  date: string;
 };
 
 type AnalyzeArgs = {
@@ -55,7 +56,6 @@ type NewsArgs = {
   mode: 'news';
   teamA: string;
   teamB: string;
-  date: string;
 };
 
 type OddsArgs = {
@@ -87,21 +87,16 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
     return { mode: 'analyze', reportPath };
   }
 
-  // --news teamA teamB date
+  // --news teamA teamB
   const newsIdx = argv.indexOf('--news');
   if (newsIdx !== -1) {
-    const [teamA, teamB, date] = argv.slice(newsIdx + 1, newsIdx + 4);
-    if (!teamA || !teamB || !date) {
-      console.error('Error: --news requires three arguments: teamA teamB date');
+    const [teamA, teamB] = argv.slice(newsIdx + 1, newsIdx + 3);
+    if (!teamA || !teamB) {
+      console.error('Error: --news requires two arguments: teamA teamB');
       printUsage(toolName, marketLabel);
       return null;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      console.error('Error: Date must be in ISO format (YYYY-MM-DD)');
-      printUsage(toolName, marketLabel);
-      return null;
-    }
-    return { mode: 'news', teamA: teamA.trim(), teamB: teamB.trim(), date: date.trim() };
+    return { mode: 'news', teamA: teamA.trim(), teamB: teamB.trim() };
   }
 
   // --odds [teamA teamB]
@@ -117,34 +112,23 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
     return { mode: 'test-connection' };
   }
 
-  // collect mode: teamA teamB date
-  if (argv.length < 3) {
-    console.error('Error: Three arguments required: teamA, teamB, date');
+  // collect mode: teamA teamB
+  if (argv.length < 2) {
+    console.error('Error: Two arguments required: teamA, teamB');
     printUsage(toolName, marketLabel);
     return null;
   }
 
   const teamA = argv[0]?.trim() ?? '';
   const teamB = argv[1]?.trim() ?? '';
-  const date = argv[2]?.trim() ?? '';
 
   if (!teamA || !teamB) {
     console.error('Error: Team names cannot be empty');
     printUsage(toolName, marketLabel);
     return null;
   }
-  if (!date) {
-    console.error('Error: Date cannot be empty');
-    printUsage(toolName, marketLabel);
-    return null;
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    console.error('Error: Date must be in ISO format (YYYY-MM-DD)');
-    printUsage(toolName, marketLabel);
-    return null;
-  }
 
-  return { mode: 'collect', teamA, teamB, date };
+  return { mode: 'collect', teamA, teamB };
 }
 
 function printUsage(toolName: string, marketLabel: string): void {
@@ -153,17 +137,16 @@ Soccer Betting Analyzer — ${marketLabel} Markets
 ${'='.repeat(42 + marketLabel.length)}
 
 Usage:
-  npm run ${toolName} "TeamA" "TeamB" "YYYY-MM-DD"       Collect data → {slug}-${toolName}.md
-  npm run ${toolName}:analyze <report.md>                 Analyse existing report → {slug}-analysis.md
-  npm run ${toolName}:news "TeamA" "TeamB" "YYYY-MM-DD"  Fetch match news → {slug}-news.md
-  npm run ${toolName}:odds "TeamA" "TeamB"                Fetch ${marketLabel.toLowerCase()} odds for a match
-  npm run ${toolName}:odds                                List upcoming events
-  npm run test:connection                                 Smoke test Claude API connection
+  npm run ${toolName} "TeamA" "TeamB"         Collect data (date auto-resolved from Odds API)
+  npm run ${toolName}:analyze <report.md>     Analyse existing report → {slug}-analysis.md
+  npm run ${toolName}:news "TeamA" "TeamB"    Fetch match news → {slug}-news.md
+  npm run ${toolName}:odds "TeamA" "TeamB"    Fetch ${marketLabel.toLowerCase()} odds for a match
+  npm run ${toolName}:odds                    List upcoming events
+  npm run test:connection                     Smoke test Claude API connection
 
 Arguments:
   TeamA  - Name of the first team (e.g., "Manchester United")
   TeamB  - Name of the second team (e.g., "Liverpool")
-  date   - Match date in ISO format (e.g., "2026-03-15")
 
 Prerequisites:
   pip install -r scripts/requirements.txt
@@ -287,6 +270,75 @@ async function testConnection(): Promise<void> {
   }
 }
 
+// ── Event resolution ─────────────────────────────────────────────────────────
+
+interface ResolvedEvent {
+  event: OddsEvent;
+  sportKey: string;
+  commenceTime: string;
+  date: string;
+  leagueKey: string;
+  leagueLabel: string;
+}
+
+/** Prompt the user to pick one of several matches. */
+function promptUserChoice(matches: { event: OddsEvent; sportKey: string }[]): Promise<number> {
+  return new Promise((resolve) => {
+    console.log('\nMultiple matches found:\n');
+    matches.forEach((m, i) => {
+      const league = getLeagueLabel(m.sportKey);
+      const dt = m.event.commence_time.replace('T', ' ').replace('Z', ' UTC');
+      console.log(`  [${i + 1}] ${league.label} — ${m.event.home_team} vs ${m.event.away_team} — ${dt}`);
+    });
+    console.log();
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('Select match: ', (answer) => {
+      rl.close();
+      const n = parseInt(answer.trim(), 10);
+      if (isNaN(n) || n < 1 || n > matches.length) {
+        console.error('Invalid selection');
+        process.exit(1);
+      }
+      resolve(n - 1);
+    });
+  });
+}
+
+/** Resolve a match event via live Odds API lookup with interactive disambiguation. */
+async function resolveEvent(teamA: string, teamB: string, marketConfig: MarketConfig): Promise<ResolvedEvent> {
+  const apiKey = process.env.THE_ODDS_API_KEY?.trim();
+  if (!apiKey) {
+    console.error('Error: THE_ODDS_API_KEY is not set in .env');
+    process.exit(1);
+  }
+
+  const collector = new OddsCollector(apiKey, marketConfig);
+  const matches = await collector.findAllEvents(teamA, teamB);
+
+  if (matches.length === 0) {
+    console.error(`No upcoming match found for "${teamA}" vs "${teamB}"`);
+    process.exit(1);
+  }
+
+  let chosen: { event: OddsEvent; sportKey: string };
+  if (matches.length === 1) {
+    chosen = matches[0];
+  } else {
+    const idx = await promptUserChoice(matches);
+    chosen = matches[idx];
+  }
+
+  const league = getLeagueLabel(chosen.sportKey);
+  return {
+    event: chosen.event,
+    sportKey: chosen.sportKey,
+    commenceTime: chosen.event.commence_time,
+    date: chosen.event.commence_time.slice(0, 10),
+    leagueKey: league.key,
+    leagueLabel: league.label,
+  };
+}
+
 // ── Main pipeline ───────────────────────────────────────────────────────────
 
 export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void> {
@@ -326,12 +378,13 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
   // ── Standalone match news mode ──
   if (args.mode === 'news') {
-    const newsFilename = path.join(REPORTS_DIR, _buildNewsFilename(args.teamA, args.teamB, args.date));
+    const resolved = await resolveEvent(args.teamA, args.teamB, marketConfig);
+    const newsFilename = path.join(REPORTS_DIR, _buildNewsFilename(args.teamA, args.teamB, resolved.date));
     const newsDir = path.dirname(newsFilename);
     if (!fs.existsSync(newsDir)) fs.mkdirSync(newsDir, { recursive: true });
     try {
       console.log(`Fetching match news for ${args.teamA} vs ${args.teamB}...`);
-      const news = await runMatchNews(args.teamA, args.teamB, args.date);
+      const news = await runMatchNews(args.teamA, args.teamB, resolved.date);
       fs.writeFileSync(newsFilename, news, 'utf8');
       console.log(`Match news saved → ${newsFilename}`);
       process.exit(0);
@@ -370,6 +423,9 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
   }
 
   // ── Full collection mode ──
+  const resolved = await resolveEvent(args.teamA, args.teamB, marketConfig);
+  console.log(`Resolved: ${resolved.event.home_team} vs ${resolved.event.away_team} — ${resolved.leagueLabel} — ${resolved.commenceTime}`);
+
   const provider = new SoccerdataProvider();
   try {
     const collector = new MatchDataCollector(provider, marketConfig, formatOptions);
@@ -377,7 +433,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     let matchNewsSummary: string | undefined;
     if (config.matchNewsFetching) {
       try {
-        matchNewsSummary = await runMatchNews(args.teamA, args.teamB, args.date);
+        matchNewsSummary = await runMatchNews(args.teamA, args.teamB, resolved.date);
       } catch (err) {
         const msg = errorMsg(err);
         console.error(`Match news skipped: ${msg}`);
@@ -387,20 +443,26 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     const markdown = await collector.collect_data({
       teamA_name: args.teamA,
       teamB_name: args.teamB,
-      match_date: args.date,
+      match_date: resolved.date,
+      eventId: resolved.event.id,
+      sportKey: resolved.sportKey,
       matchNewsSummary,
     });
 
-    const reportFilename = path.join(REPORTS_DIR, _buildReportFilename(args.teamA, args.teamB, args.date, toolName));
+    const reportFilename = path.join(REPORTS_DIR, _buildReportFilename(args.teamA, args.teamB, resolved.date, toolName));
     const reportDir = path.dirname(reportFilename);
     if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
     fs.writeFileSync(reportFilename, markdown, 'utf8');
-    writeMetaJson(reportDir, args.teamA, args.teamB);
+    writeMetaJson(reportDir, {
+      commenceTime: resolved.commenceTime,
+      leagueKey: resolved.leagueKey,
+      leagueLabel: resolved.leagueLabel,
+    });
     console.log(`Report saved → ${reportFilename}`);
 
     if (config.analysisEnabled) {
       try {
-        const analysisFilename = path.join(REPORTS_DIR, _buildAnalysisFilename(args.teamA, args.teamB, args.date, toolName));
+        const analysisFilename = path.join(REPORTS_DIR, _buildAnalysisFilename(args.teamA, args.teamB, resolved.date, toolName));
         await runAnalysis(markdown, analysisFilename, analysisPrompt, marketLabel);
       } catch (err) {
         const msg = errorMsg(err);
@@ -426,7 +488,6 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
     console.error('Please check:');
     console.error('  - Team names are spelled correctly');
-    console.error('  - Date is in ISO format (YYYY-MM-DD)');
     console.error('  - Python 3 + soccerdata are installed (pip install -r scripts/requirements.txt)');
     console.error('  - You have an active internet connection\n');
 
@@ -434,43 +495,19 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
   }
 }
 
-// ── League metadata for CLI-generated reports ───────────────────────────────
+// ── Match metadata ───────────────────────────────────────────────────────────
 
-const CACHE_DIR = path.join(__dirname, '..', 'data', 'cache');
-
-/** Look up league info from fixture cache files by matching team names. */
-function findLeagueForMatch(teamA: string, teamB: string): { leagueKey: string; leagueLabel: string } | null {
-  if (!fs.existsSync(CACHE_DIR)) return null;
-  const files = fs.readdirSync(CACHE_DIR).filter(f => f.startsWith('fixtures-') && f.endsWith('.json'));
-  const lower = (s: string) => s.toLowerCase();
-  const a = lower(teamA);
-  const b = lower(teamB);
-
-  for (const file of files) {
-    try {
-      const fixtures = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, file), 'utf8'));
-      if (!Array.isArray(fixtures)) continue;
-      for (const f of fixtures) {
-        if ((lower(f.home_team).includes(a) && lower(f.away_team).includes(b)) ||
-            (lower(f.home_team).includes(b) && lower(f.away_team).includes(a))) {
-          return { leagueKey: f.league_key, leagueLabel: f.league_label };
-        }
-      }
-    } catch { /* skip corrupt cache */ }
-  }
-  return null;
-}
-
-/** Write meta.json with league info into the report directory. */
-function writeMetaJson(reportDir: string, teamA: string, teamB: string): void {
-  const league = findLeagueForMatch(teamA, teamB);
-  if (!league) return;
+/** Write meta.json with event metadata into the report directory. */
+function writeMetaJson(reportDir: string, meta: {
+  commenceTime: string;
+  leagueKey: string;
+  leagueLabel: string;
+}): void {
   const metaPath = path.join(reportDir, 'meta.json');
-  let meta: Record<string, string> = {};
+  let existing: Record<string, string> = {};
   if (fs.existsSync(metaPath)) {
-    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { /* overwrite */ }
+    try { existing = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { /* overwrite */ }
   }
-  meta.leagueKey = league.leagueKey;
-  meta.leagueLabel = league.leagueLabel;
-  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8');
+  Object.assign(existing, meta);
+  fs.writeFileSync(metaPath, JSON.stringify(existing, null, 2) + '\n', 'utf8');
 }

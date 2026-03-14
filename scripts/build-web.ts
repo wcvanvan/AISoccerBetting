@@ -179,6 +179,7 @@ interface ManifestEntry {
   homeTeam: string;
   awayTeam: string;
   date: string;
+  commenceTime: string;
   leagueKey: string;
   leagueLabel: string;
   markets: Record<string, MarketInfo>;
@@ -201,7 +202,7 @@ function scanReports(): ManifestEntry[] {
     const dm = entry.name.match(dirPattern);
     if (!dm) continue;
 
-    const [, homeSlug, awaySlug, date] = dm;
+    const [, homeSlug, awaySlug] = dm;
     const matchKey = entry.name;
     const dirPath = path.join(REPORTS_DIR, entry.name);
     const files = fs.readdirSync(dirPath).filter((f) => filePattern.test(f));
@@ -217,19 +218,28 @@ function scanReports(): ManifestEntry[] {
 
     let leagueKey = '';
     let leagueLabel = '';
+    let commenceTime = '';
     const metaPath = path.join(dirPath, 'meta.json');
     if (fs.existsSync(metaPath)) {
       try {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
         leagueKey = meta.leagueKey || '';
         leagueLabel = meta.leagueLabel || '';
+        commenceTime = meta.commenceTime || '';
       } catch (e) {
         console.warn(`Warning: failed to parse ${metaPath}: ${(e as Error).message}`);
       }
     }
 
+    if (!commenceTime) {
+      console.warn(`Warning: ${matchKey} has no commenceTime in meta.json, skipping`);
+      continue;
+    }
+
+    const date = commenceTime.slice(0, 10);
+
     const match: ManifestEntry = {
-      matchId: matchKey, date, homeTeam, awayTeam, leagueKey, leagueLabel,
+      matchId: matchKey, date, commenceTime, homeTeam, awayTeam, leagueKey, leagueLabel,
       markets: {}, lastModified: 0,
     };
 
