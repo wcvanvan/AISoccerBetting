@@ -55,6 +55,114 @@ function extractValuePicks(markdown: string): string {
   return lines.slice(cutoff).join('\n');
 }
 
+function normalizeAnalysis(raw: string): string {
+  // 1. Strip preamble — remove everything before the first heading
+  let text = raw.replace(/^[\s\S]*?(?=^#\s)/m, '');
+
+  const lines = text.split('\n');
+
+  // Extract h1 title (first line if it's an h1)
+  let title = '';
+  let bodyStart = 0;
+  if (lines[0] && /^#\s/.test(lines[0])) {
+    title = lines[0];
+    bodyStart = 1;
+  }
+
+  const body = lines.slice(bodyStart).join('\n');
+
+  // 2. Unwrap "Phase 4" wrapper — if heading contains a canonical section name after "Phase 4",
+  //    keep the section name as an h2; otherwise discard the heading entirely
+  const unwrapped = body.replace(
+    /^(#{1,3})\s*phase\s*4\s*[—–\-:]*\s*(.*)/gim,
+    (_match, _hashes, rest) => {
+      const trimmed = rest.trim();
+      if (!trimmed) return ''; // bare "Phase 4" heading — discard
+      return `## ${trimmed}`; // "Phase 4 — Statistical Summary" → "## Statistical Summary"
+    },
+  ).replace(
+    /^###\s+(Statistical Summary|Detailed Analysis|Value Picks|Bets? to Avoid|Caveats?)/gim,
+    '## $1',
+  );
+
+  // 3. Parse into sections by h2 headings
+  interface Section { heading: string; content: string; canonical: string }
+  const sections: Section[] = [];
+  let preambleContent = '';
+
+  const sectionRegex = /^##\s+(.+)$/gm;
+  let match: RegExpExecArray | null;
+  const cuts: { idx: number; fullLen: number; text: string }[] = [];
+
+  while ((match = sectionRegex.exec(unwrapped)) !== null) {
+    cuts.push({ idx: match.index, fullLen: match[0].length, text: match[1] });
+  }
+
+  for (let i = 0; i < cuts.length; i++) {
+    const start = cuts[i].idx + cuts[i].fullLen;
+    const end = i + 1 < cuts.length ? cuts[i + 1].idx : unwrapped.length;
+    const content = unwrapped.slice(start, end).trim();
+
+    sections.push({ heading: cuts[i].text, content, canonical: '' });
+  }
+
+  // Content before the first h2
+  if (cuts.length > 0) {
+    preambleContent = unwrapped.slice(0, cuts[0].idx).trim();
+  } else {
+    preambleContent = unwrapped.trim();
+  }
+
+  // 4. Classify each section into a canonical bucket
+  const canonicalOrder = [
+    'Statistical Summary',
+    'Detailed Analysis',
+    'Value Picks',
+    'Bets to Avoid',
+    'Caveats',
+  ];
+
+  function classify(heading: string): string {
+    const h = heading.toLowerCase();
+    if (/stat(istical)?\s*summary/i.test(h)) return 'Statistical Summary';
+    if (/detailed\s*analysis/i.test(h)) return 'Detailed Analysis';
+    if (/phase\s*[1-3]/i.test(h)) return 'Detailed Analysis';
+    if (/value\s*picks/i.test(h)) return 'Value Picks';
+    if (/bets?\s*to\s*avoid/i.test(h)) return 'Bets to Avoid';
+    if (/caveat/i.test(h)) return 'Caveats';
+    return '';
+  }
+
+  for (const sec of sections) {
+    sec.canonical = classify(sec.heading);
+  }
+
+  // 5. Merge sections into canonical buckets
+  const buckets = new Map<string, string[]>();
+  for (const name of canonicalOrder) buckets.set(name, []);
+
+  if (preambleContent) {
+    buckets.get('Detailed Analysis')!.push(preambleContent);
+  }
+
+  for (const sec of sections) {
+    const bucket = sec.canonical || 'Detailed Analysis';
+    buckets.get(bucket)!.push(sec.content);
+  }
+
+  // 6. Reassemble in canonical order
+  const parts: string[] = [];
+  if (title) parts.push(title);
+
+  for (const name of canonicalOrder) {
+    const content = buckets.get(name)!;
+    if (content.length === 0) continue;
+    parts.push(`## ${name}\n\n${content.join('\n\n')}`);
+  }
+
+  return parts.join('\n\n');
+}
+
 function renderMarkdown(md: string): string {
   return wrapTables(marked.parse(md) as string);
 }
@@ -165,7 +273,8 @@ function buildReportHtml(matches: ManifestEntry[]): void {
       }
 
       if (info.hasAnalysis) {
-        const md = fs.readFileSync(analysisPath, 'utf8');
+        const rawMd = fs.readFileSync(analysisPath, 'utf8');
+        const md = normalizeAnalysis(rawMd);
         fs.writeFileSync(path.join(outDir, `${market}-analysis.html`), renderMarkdown(md));
 
         // {market}-concise.html

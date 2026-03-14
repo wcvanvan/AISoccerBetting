@@ -150,6 +150,14 @@ Model the spread distribution using difference of two independent Poisson/NB var
 
 ## Phase 4 -- Output
 
+**Heading format**: use exactly these h2 headings, in this order:
+## Statistical Summary
+## Detailed Analysis
+## Value Picks
+## Bets to Avoid
+## Caveats
+Do not wrap them in a "Phase 4" parent heading. Start the report directly with ## Statistical Summary.
+
 ### Statistical Summary
 
 | Metric | Team A (Home) | Team B (Away) |
