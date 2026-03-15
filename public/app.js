@@ -275,6 +275,11 @@ function renderDatePage() {
     }
   });
 
+  // Sort events within each league by kickoff time
+  const byKickoff = (a, b) => (a.commenceTime || '').localeCompare(b.commenceTime || '');
+  leagueGroups.forEach((lg) => lg.events.sort(byKickoff));
+  noLeague.sort(byKickoff);
+
   renderLeagueFilterBar(leagueGroups);
 
   let totalEvents = page.events.length;
