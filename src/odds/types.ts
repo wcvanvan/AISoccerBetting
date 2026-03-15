@@ -56,7 +56,5 @@ export interface MatchOdds {
   /** Populated when found is true */
   homeTeam?: string;
   awayTeam?: string;
-  /** Full ISO 8601 UTC commence time from The Odds API */
-  commenceTime?: string;
   markets: MarketGroup[];
 }

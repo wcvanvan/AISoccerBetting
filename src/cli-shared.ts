@@ -11,7 +11,7 @@ const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 import { configureAnthropicProxy } from './agent/configure-proxy';
 import { MatchDataCollector } from './collector';
 import { runMatchNews, analyzeReport } from './agent';
-import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel } from './odds';
+import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel, resolveSportKeys } from './odds';
 import { OddsEvent } from './odds/types';
 import * as readline from 'readline';
 import { FormatOptions } from './formatter';
@@ -220,11 +220,7 @@ async function showOdds(
 }
 
 async function listOddsEvents(apiKey: string): Promise<void> {
-  const rawKeys = process.env.ODDS_SPORT_KEYS?.trim();
-  const sportKeys = rawKeys
-    ? rawKeys.split(',').map(s => s.trim()).filter(Boolean)
-    : ['soccer_epl', 'soccer_fa_cup', 'soccer_uefa_champs_league', 'soccer_france_ligue_one'];
-
+  const sportKeys = resolveSportKeys();
   const client = new OddsApiClient(apiKey);
 
   for (const sportKey of sportKeys) {

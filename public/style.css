@@ -127,7 +127,7 @@ main { padding: 20px 0; }
   transition: background 0.1s;
 }
 
-.events-table tbody tr:hover td {
+.events-table tbody tr:hover:not(.league-header-row) td {
   background: var(--bg-hover);
 }
 
@@ -142,6 +142,30 @@ main { padding: 20px 0; }
   padding: 0 8px;
   font-size: 12px;
   font-weight: 500;
+}
+
+/* ── Match time cell ───────────────────────────────────────────────────── */
+.time-cell {
+  width: 72px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ── League header row inside unified table ────────────────────────────── */
+.league-header-row td {
+  padding: 16px 16px 6px;
+  border-bottom: none;
+}
+
+.league-header-row {
+  cursor: default;
+}
+
+.league-header-row:first-child td {
+  padding-top: 4px;
 }
 
 /* ── League filter bar ─────────────────────────────────────────────────── */
@@ -686,14 +710,6 @@ main { padding: 20px 0; }
 }
 
 /* ── League sections ───────────────────────────────────────────────────── */
-.league-section {
-  margin-bottom: 20px;
-}
-
-.league-section-header {
-  margin-bottom: 6px;
-}
-
 .league-badge-lg {
   font-size: 12px;
   padding: 5px 12px;

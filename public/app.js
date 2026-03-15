@@ -21,6 +21,12 @@ function todayDateStr() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+/** Format a UTC ISO string as local time, e.g. "5:30 PM". */
+function formatKickoff(commenceTime) {
+  if (!commenceTime) return '';
+  return new Date(commenceTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
 // ── Page navigation ─────────────────────────────────────────────────────────
 
 function showPage(page) {
@@ -291,60 +297,65 @@ function renderDatePage() {
     filteredNoLeague = [];
   }
 
-  filteredGroups.forEach((lg) => renderLeagueSection(container, lg.key, lg.label, lg.events));
-  if (filteredNoLeague.length > 0) renderLeagueSection(container, '', 'Other', filteredNoLeague);
-}
-
-// ── League section with table rows ──────────────────────────────────────────
-
-function renderLeagueSection(container, leagueKey, leagueLabel, events) {
-  const section = document.createElement('div');
-  section.className = 'league-section';
-
-  const header = document.createElement('div');
-  header.className = 'league-section-header';
-  const badge = document.createElement('span');
-  badge.className = 'league-badge league-badge-lg';
-  if (leagueKey) badge.dataset.league = leagueKey;
-  badge.textContent = leagueLabel;
-  header.appendChild(badge);
-  section.appendChild(header);
-
+  // Single table for all leagues — ensures columns align across sections
   const table = document.createElement('table');
   table.className = 'events-table';
   const tbody = document.createElement('tbody');
 
-  events.forEach((e) => {
-    const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
-    tr.addEventListener('click', () => openMatchPage(e));
+  const sections = filteredGroups.map((lg) => ({ key: lg.key, label: lg.label, events: lg.events }));
+  if (filteredNoLeague.length > 0) sections.push({ key: '', label: 'Other', events: filteredNoLeague });
 
-    // Teams cell
-    const tdMatch = document.createElement('td');
-    const homeSpan = document.createElement('span');
-    homeSpan.className = 'team-name';
-    homeSpan.textContent = e.homeTeam;
-    const vsSpan = document.createElement('span');
-    vsSpan.className = 'vs';
-    vsSpan.textContent = 'vs';
-    const awaySpan = document.createElement('span');
-    awaySpan.className = 'team-name';
-    awaySpan.textContent = e.awayTeam;
-    tdMatch.append(homeSpan, vsSpan, awaySpan);
-    tr.appendChild(tdMatch);
+  sections.forEach((lg) => {
+    // League header row
+    const headerTr = document.createElement('tr');
+    headerTr.className = 'league-header-row';
+    const headerTd = document.createElement('td');
+    headerTd.colSpan = 3;
+    const badge = document.createElement('span');
+    badge.className = 'league-badge league-badge-lg';
+    if (lg.key) badge.dataset.league = lg.key;
+    badge.textContent = lg.label;
+    headerTd.appendChild(badge);
+    headerTr.appendChild(headerTd);
+    tbody.appendChild(headerTr);
 
-    // Market badges cell
-    const tdCache = document.createElement('td');
-    tdCache.className = 'cache-cell col-right';
-    renderInlineMarketBadges(tdCache, e.markets);
-    tr.appendChild(tdCache);
+    lg.events.forEach((e) => {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', () => openMatchPage(e));
 
-    tbody.appendChild(tr);
+      // Time cell
+      const tdTime = document.createElement('td');
+      tdTime.className = 'time-cell';
+      tdTime.textContent = formatKickoff(e.commenceTime);
+      tr.appendChild(tdTime);
+
+      // Teams cell
+      const tdMatch = document.createElement('td');
+      const homeSpan = document.createElement('span');
+      homeSpan.className = 'team-name';
+      homeSpan.textContent = e.homeTeam;
+      const vsSpan = document.createElement('span');
+      vsSpan.className = 'vs';
+      vsSpan.textContent = 'vs';
+      const awaySpan = document.createElement('span');
+      awaySpan.className = 'team-name';
+      awaySpan.textContent = e.awayTeam;
+      tdMatch.append(homeSpan, vsSpan, awaySpan);
+      tr.appendChild(tdMatch);
+
+      // Market badges cell
+      const tdCache = document.createElement('td');
+      tdCache.className = 'cache-cell col-right';
+      renderInlineMarketBadges(tdCache, e.markets);
+      tr.appendChild(tdCache);
+
+      tbody.appendChild(tr);
+    });
   });
 
   table.appendChild(tbody);
-  section.appendChild(table);
-  container.appendChild(section);
+  container.appendChild(table);
 }
 
 function renderInlineMarketBadges(cell, markets) {
@@ -422,9 +433,7 @@ function renderMatchPage() {
   detailsRow.className = 'match-info-details';
   const dateSpan = document.createElement('span');
   if (m.commenceTime) {
-    const kickoff = new Date(m.commenceTime);
-    const timeStr = kickoff.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    dateSpan.textContent = dateStr + ' \u2014 ' + timeStr + ' (local)';
+    dateSpan.textContent = dateStr + ' \u2014 ' + formatKickoff(m.commenceTime);
   } else {
     dateSpan.textContent = dateStr;
   }

@@ -31,7 +31,6 @@ export function getLeagueLabel(sportKey: string): { key: string; label: string }
   return LEAGUE_LABELS[sportKey] ?? { key: sportKey, label: sportKey };
 }
 
-/** Strip accents, punctuation, and lowercase for matching. */
 /** Strip accents, replace punctuation with spaces, and collapse whitespace. */
 const norm = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -77,7 +76,7 @@ function resolveEnv(key: string, fallback?: string): string | undefined {
   return process.env[key]?.trim() || fallback;
 }
 
-function resolveSportKeys(): string[] {
+export function resolveSportKeys(): string[] {
   const env = resolveEnv('ODDS_SPORT_KEYS');
   return env ? env.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_SPORT_KEYS;
 }
@@ -103,28 +102,26 @@ export class OddsCollector {
     sportKey?: string,
   ): Promise<MatchOdds> {
     try {
-      let event: OddsEvent;
+      let resolvedEventId: string;
       let resolvedSportKey: string;
+      let homeTeam = teamA;
+      let awayTeam = teamB;
 
       if (eventId && sportKey) {
         // Caller already resolved the event — fetch odds directly
+        resolvedEventId = eventId;
         resolvedSportKey = sportKey;
-        event = { id: eventId, sport_key: sportKey, sport_title: '', home_team: teamA, away_team: teamB, commence_time: '' };
       } else {
         const result = await this.findEvent(teamA, teamB);
         if (!result) return { found: false, markets: [] };
-        event = result.event;
+        resolvedEventId = result.event.id;
         resolvedSportKey = result.sportKey;
+        homeTeam = result.event.home_team;
+        awayTeam = result.event.away_team;
       }
 
-      const markets = await this.fetchFilteredOdds(resolvedSportKey, event.id);
-      return {
-        found: true,
-        homeTeam: event.home_team,
-        awayTeam: event.away_team,
-        commenceTime: event.commence_time || undefined,
-        markets,
-      };
+      const markets = await this.fetchFilteredOdds(resolvedSportKey, resolvedEventId);
+      return { found: true, homeTeam, awayTeam, markets };
     } catch (err) {
       console.error(`Odds collection skipped: ${err instanceof Error ? err.message : err}`);
       return { found: false, markets: [] };
