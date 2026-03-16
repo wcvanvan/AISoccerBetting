@@ -59,12 +59,13 @@ Compute mean/SD of total corners across all valid games (both teams). Flag games
 
 ### 1F. Lineup, Substitution & Formation
 
+Don't put too much importance on formation — in-match formation is very flexible and shifts constantly. Focus more on the lineup (which players are on the pitch) as the primary driver of corner patterns.
+
 For each team:
 
 1. **Player–corner correlation**: table (Player | Games In | Avg Won In/Out | Avg Total In/Out) for players in ≥ 3 valid games. Flag notable correlations; report with/without outlier if applicable.
 2. **Early attacking subs** (before 70'): compare total corners in those games vs others.
 3. **Early exits** (starter off before 60'): note unusual corner output.
-4. **Formation correlation**: table (Formation | Games | Avg Won | Avg Conceded | Avg Total). If expected formation has no sample history, note uncertainty and identify closest match.
 
 ### 1G. Absence Impact
 
