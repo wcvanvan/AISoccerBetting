@@ -58,7 +58,7 @@ export const config = {
 
   news: {
     get model(): string {
-      return optionalEnv('WEB_SEARCH_MODEL') ?? 'claude-sonnet-4-6';
+      return optionalEnv('WEB_SEARCH_MODEL') ?? 'claude-opus-4-6';
     },
   },
 

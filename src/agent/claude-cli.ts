@@ -16,6 +16,14 @@ const PROJECT_ROOT = path.resolve(__dirname, '../..');
 export interface ClaudeCliOptions {
   /** Optional log callback for stderr lines */
   onLog?: (line: string) => void;
+  /** Override the model (defaults to config.analysis.model) */
+  model?: string;
+  /** Override max output tokens (defaults to 128000) */
+  maxOutputTokens?: number;
+  /** CLI effort level (defaults to 'high') */
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  /** Timeout in milliseconds. If set, kills the subprocess after this duration. */
+  timeoutMs?: number;
 }
 
 /**
@@ -37,16 +45,15 @@ export function runClaudeCli(
     const env = { ...process.env };
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
-    // 128K tokens — analyses are long (30K+) and default 32K truncates output
-    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '128000';
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(opts.maxOutputTokens ?? 128_000);
 
-    const model = config.analysis.model;
+    const model = opts.model ?? config.analysis.model;
     const child = spawn(
       'claude',
       [
         '--print', '--output-format', 'stream-json', '--verbose',
         '--model', model,
-        '--effort', 'high', // 'max' crashes silently with large prompts (35KB+)
+        '--effort', opts.effort ?? 'high', // 'max' crashes silently with large prompts (35KB+)
         '--dangerously-skip-permissions',
       ],
       {
@@ -71,7 +78,17 @@ export function runClaudeCli(
       if (text && onLog) onLog(text);
     });
 
+    // Optional timeout: kill the subprocess if it exceeds the deadline
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (opts.timeoutMs) {
+      timeoutId = setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error(`Claude CLI timed out after ${Math.round(opts.timeoutMs! / 1000)}s`));
+      }, opts.timeoutMs);
+    }
+
     child.on('error', (err) => {
+      if (timeoutId) clearTimeout(timeoutId);
       reject(
         new Error(
           `Claude CLI not found. Install it: npm install -g @anthropic-ai/claude-code. ${err.message}`,
@@ -80,6 +97,7 @@ export function runClaudeCli(
     });
 
     child.on('exit', (code) => {
+      if (timeoutId) clearTimeout(timeoutId);
       const output = extractAllText(stdout);
       if (!output) {
         const detail = code !== 0 ? ` (exit code ${code})` : '';
@@ -121,3 +139,4 @@ function extractAllText(raw: string): string {
 
   return parts.join('\n\n').trim();
 }
+

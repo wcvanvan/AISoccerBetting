@@ -103,6 +103,26 @@ export interface LeagueContext {
   cleanSheetAwayPct: number;
 }
 
+/** A player in a Sofascore lineup */
+export interface LineupPlayer {
+  name: string;
+  position: string;
+  shirtNumber?: number;
+  substitute: boolean;
+}
+
+/** One side of a Sofascore lineup */
+export interface LineupSide {
+  formation: string | null;
+  players: LineupPlayer[];
+}
+
+/** Sofascore lineup data for both teams */
+export interface MatchLineups {
+  home: LineupSide;
+  away: LineupSide;
+}
+
 export class SoccerdataProvider implements DataProvider {
   readonly name = 'soccerdata';
 
@@ -261,6 +281,42 @@ export class SoccerdataProvider implements DataProvider {
       over55CardsPct: Number(raw.over_5_5_cards_pct) || 0,
       over65CardsPct: Number(raw.over_6_5_cards_pct) || 0,
       avgFoulsPerCard: Number(raw.avg_fouls_per_card) || 0,
+    };
+  }
+
+  /**
+   * Fetch confirmed lineups from Sofascore for a specific match.
+   * Returns null if lineups are not yet available (pre-matchday).
+   */
+  async getSofascoreLineups(teamA: string, teamB: string, matchDate: string): Promise<MatchLineups | null> {
+    const result = await this.call('get_sofascore_lineups', {
+      team_a: teamA,
+      team_b: teamB,
+      match_date: matchDate,
+    });
+    if (result == null || typeof result !== 'object') return null;
+    const raw = result as Record<string, unknown>;
+
+    const toSide = (side: unknown): LineupSide => {
+      if (side == null || typeof side !== 'object') {
+        return { formation: null, players: [] };
+      }
+      const s = side as Record<string, unknown>;
+      const players = (s.players as Array<Record<string, unknown>> ?? []).map((p) => ({
+        name: String(p.name ?? ''),
+        position: String(p.position ?? ''),
+        shirtNumber: p.shirt_number != null ? Number(p.shirt_number) : undefined,
+        substitute: Boolean(p.substitute),
+      }));
+      return {
+        formation: s.formation != null ? String(s.formation) : null,
+        players,
+      };
+    };
+
+    return {
+      home: toSide(raw.home),
+      away: toSide(raw.away),
     };
   }
 

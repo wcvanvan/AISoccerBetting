@@ -1,70 +1,37 @@
 /**
- * Match-news fetcher: runs the match-news-and-lineup agent via LangChain.
- * The agent uses Claude + Tavily web search,
- * so it can fetch real-time match news, lineups, and absences from the web.
+ * Match-news fetcher: runs the match-news agent via Claude Code CLI.
+ * Uses the same CLI invocation as the analysis stage, which includes
+ * built-in web search capability.
  *
- * Requires in .env:
- *   CLAUDE_API_KEY    – for Claude
- *   WEB_SEARCH_MODEL      – Claude model to use
- *   TAVILY_API_KEY       – for Tavily web search (free tier at app.tavily.com)
- * Optional:
- *   PROXY / HTTP_PROXY – proxy for outbound requests
+ * Requires: `claude` CLI installed globally.
  */
 
-import { createAgent } from 'langchain';
-import { ChatAnthropic } from '@langchain/anthropic';
-import { TavilySearch } from '@langchain/tavily';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { configureAnthropicProxy } from './configure-proxy';
+import { runClaudeCli } from './claude-cli';
 import { stripCodeFences } from './strip-code-fences';
-import { extractTextContent } from './extract-content';
 import { config } from '../config';
 import { MATCH_NEWS_SYSTEM_PROMPT } from './prompts/match-news-system-prompt';
 
 function buildUserMessage(teamA: string, teamB: string, matchDate: string): string {
-  return `Collect match news and lineup for: ${teamA} vs ${teamB}, date ${matchDate}. Use the search tool to find real-time information. Return only the summarized block in the format specified in your instructions.`;
+  return `Collect match context for: ${teamA} vs ${teamB}, date ${matchDate}. Use web search to find real-time information. Return only the structured block in the format specified in your instructions.`;
 }
 
 /**
- * Fetch match news summary using a LangChain agent with Claude + Tavily web search.
- * The agent will search the web for match news, lineups, and absences.
+ * Fetch match news summary using Claude Code CLI with built-in web search.
  */
 export async function runMatchNews(
   teamA: string,
   teamB: string,
-  matchDate: string
+  matchDate: string,
 ): Promise<string> {
-  const apiKey = config.anthropicApiKey;
-  if (!apiKey) {
-    throw new Error('Set CLAUDE_API_KEY in .env to fetch match news.');
-  }
-  if (!config.tavilyApiKey) {
-    throw new Error('Set TAVILY_API_KEY in .env for web search (free key at app.tavily.com).');
-  }
-
-  configureAnthropicProxy();
-
   const userMessage = buildUserMessage(teamA, teamB, matchDate);
+  const prompt = [MATCH_NEWS_SYSTEM_PROMPT, '', '---', '', userMessage].join('\n');
 
-  const llm = new ChatAnthropic({ model: config.news.model, apiKey });
-  const tavilyTool = new TavilySearch({ maxResults: 5 });
-
-  const agent = createAgent({ model: llm, tools: [tavilyTool] });
-
-  const result = await agent.invoke({
-    messages: [
-      new SystemMessage(MATCH_NEWS_SYSTEM_PROMPT),
-      new HumanMessage(userMessage),
-    ],
+  const result = await runClaudeCli(prompt, {
+    onLog: (line) => console.error(line),
+    model: config.news.model,
+    maxOutputTokens: 16_384,
+    effort: 'medium',
   });
 
-  // Last message in the agent response is the final AI reply
-  const messages: Array<{ content?: unknown }> = result.messages ?? [];
-  const last = messages[messages.length - 1];
-  const content = last?.content;
-
-  const text = extractTextContent(content);
-  if (!text) throw new Error('Agent returned no text content.');
-  return stripCodeFences(text);
+  return stripCodeFences(result);
 }
-

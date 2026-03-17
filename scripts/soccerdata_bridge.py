@@ -150,6 +150,7 @@ class DataAssembler:
         self._leagues = get_leagues()
         self._seasons = get_seasons()
         self._espn = None       # lazy-initialised ESPN instance
+        self._sofascore = None  # lazy-initialised Sofascore instance
         self._schedule = None   # cached schedule DataFrame
         self._player_season_stats = None  # cached Understat player season stats
 
@@ -159,6 +160,25 @@ class DataAssembler:
             import soccerdata as sd
             self._espn = sd.ESPN(self._leagues, self._seasons)
         return self._espn
+
+    def _get_sofascore(self):
+        """Return a cached Sofascore instance.
+
+        Sofascore supports fewer leagues than ESPN, so we filter to only
+        the leagues it recognises. Sofascore also uses "YYYY-YYYY" season
+        format (e.g. "2025-2026") instead of ESPN's "YYYY".
+        """
+        if self._sofascore is None:
+            import soccerdata as sd
+            available = {lg for lg in sd.Sofascore.available_leagues()}
+            sofascore_leagues = [lg for lg in self._leagues if lg in available]
+            if not sofascore_leagues:
+                raise ValueError("No Sofascore-compatible leagues configured")
+            # Only use the current season — Sofascore chokes on old season codes
+            current = self._seasons[0]  # e.g. "2025"
+            sofascore_season = f"{current}-{int(current)+1}"  # "2025-2026"
+            self._sofascore = sd.Sofascore(sofascore_leagues, sofascore_season)
+        return self._sofascore
 
     def _get_schedule(self):
         """Return a cached schedule DataFrame with scores.
@@ -1647,6 +1667,97 @@ class DataAssembler:
         }
 
 
+    def get_sofascore_lineups(self, team_a: str, team_b: str, match_date: str) -> dict[str, Any] | None:
+        """Fetch confirmed lineup data from Sofascore for a specific match.
+
+        Searches across all configured Sofascore-compatible leagues for the
+        match, then fetches lineups from the event API. Returns None if
+        lineups are not yet available.
+        """
+        import json as _json
+
+        try:
+            ss = self._get_sofascore()
+        except Exception as exc:
+            log.warning("Sofascore init failed: %s", exc)
+            return None
+
+        # Alias table for matching common short names to Sofascore team names
+        ALIASES: dict[str, str] = {
+            "wolves": "wolverhampton", "spurs": "tottenham",
+            "villa": "aston villa", "forest": "nottingham forest",
+            "palace": "crystal palace", "saints": "southampton",
+            "hammers": "west ham",
+        }
+
+        def teams_match(token: str, candidate: str) -> bool:
+            t, c = token.lower(), candidate.lower()
+            if t in c or c in t:
+                return True
+            expanded = ALIASES.get(t)
+            return bool(expanded and (expanded in c or c in expanded))
+
+        # Search for events on the given date
+        url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{match_date}"
+        try:
+            resp = ss.get(url)
+            data = _json.load(resp)
+        except Exception as exc:
+            log.warning("Sofascore events API failed: %s", exc)
+            return None
+
+        game_id = None
+        for event in data.get("events", []):
+            home = event.get("homeTeam", {}).get("name", "")
+            away = event.get("awayTeam", {}).get("name", "")
+            a_tokens = team_a.lower().replace("-", " ").split()
+            b_tokens = team_b.lower().replace("-", " ").split()
+            a_home = any(teams_match(t, home) for t in a_tokens)
+            a_away = any(teams_match(t, away) for t in a_tokens)
+            b_home = any(teams_match(t, home) for t in b_tokens)
+            b_away = any(teams_match(t, away) for t in b_tokens)
+            if (a_home and b_away) or (a_away and b_home):
+                game_id = event.get("id")
+                break
+
+        if game_id is None:
+            log.info("No matching Sofascore event for %s vs %s on %s", team_a, team_b, match_date)
+            return None
+
+        # Fetch lineups
+        lineup_url = f"https://api.sofascore.com/api/v1/event/{game_id}/lineups"
+        try:
+            resp = ss.get(lineup_url)
+            lineup_data = _json.load(resp)
+        except Exception as exc:
+            log.warning("Sofascore lineups API failed for event %s: %s", game_id, exc)
+            return None
+
+        if "home" not in lineup_data or "away" not in lineup_data:
+            log.info("Lineups not yet available for event %s", game_id)
+            return None
+
+        def extract_side(side: dict[str, Any]) -> dict[str, Any]:
+            players = []
+            for p in side.get("players", []):
+                player = p.get("player", {})
+                players.append({
+                    "name": player.get("name", ""),
+                    "position": player.get("position", ""),
+                    "shirt_number": player.get("shirtNumber"),
+                    "substitute": p.get("substitute", False),
+                })
+            return {
+                "formation": side.get("formation"),
+                "players": players,
+            }
+
+        return {
+            "home": extract_side(lineup_data["home"]),
+            "away": extract_side(lineup_data["away"]),
+        }
+
+
 # ── Request dispatcher ───────────────────────────────────────────────────────
 
 def handle_request(assembler: DataAssembler, req: dict[str, Any]) -> Any:
@@ -1685,6 +1796,13 @@ def handle_request(assembler: DataAssembler, req: dict[str, Any]) -> Any:
 
     if method == "get_league_card_context":
         return assembler.get_league_card_context(league=params["league"])
+
+    if method == "get_sofascore_lineups":
+        return assembler.get_sofascore_lineups(
+            team_a=params["team_a"],
+            team_b=params["team_b"],
+            match_date=params["match_date"],
+        )
 
     raise ValueError(f"Unknown method: {method}")
 

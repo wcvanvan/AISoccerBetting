@@ -1,16 +1,12 @@
 /**
  * Main orchestrator for match data collection.
- * Coordinates data fetching (via DataProvider), odds, and formatting.
- *
- * Parameterised by MarketConfig to support corner, goal, and card pipelines.
+ * Coordinates data fetching (via DataProvider) and formatting.
  */
 
 import { DataProvider } from '../provider/data-provider';
-import { SoccerdataProvider, TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext } from '../provider/soccerdata-provider';
+import { SoccerdataProvider, TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext, MatchLineups } from '../provider/soccerdata-provider';
 import { MarkdownFormatter, FormatOptions } from '../formatter';
 import { MatchDetails, H2HMatch } from '../types';
-import { OddsCollector, MarketConfig, CORNER_MARKET_CONFIG } from '../odds';
-import { MatchOdds } from '../odds/types';
 
 /**
  * Input parameters for match data collection
@@ -23,14 +19,11 @@ export interface MatchDataCollectorInput {
   eventId?: string;
   /** Pre-resolved Odds API sport key — required when eventId is set */
   sportKey?: string;
-  /** Optional match news summary; when set, appended to report before Alerts */
-  matchNewsSummary?: string;
 }
 
 /**
  * Main orchestrator class that wires all components together.
- * Accepts a DataProvider for source-agnostic data fetching,
- * a MarketConfig to determine which odds markets to fetch,
+ * Accepts a DataProvider for source-agnostic data fetching
  * and FormatOptions to control report formatting.
  */
 function errorMsg(err: unknown): string {
@@ -40,22 +33,16 @@ function errorMsg(err: unknown): string {
 export class MatchDataCollector {
   private provider: DataProvider;
   private markdownFormatter: MarkdownFormatter;
-  private oddsCollector: OddsCollector | null;
-  private marketConfig: MarketConfig;
   private formatOptions: Partial<FormatOptions>;
   private alerts: string[];
 
   constructor(
     provider: DataProvider,
-    marketConfig: MarketConfig = CORNER_MARKET_CONFIG,
     formatOptions: Partial<FormatOptions> = {}
   ) {
     this.provider = provider;
-    this.marketConfig = marketConfig;
     this.formatOptions = formatOptions;
     this.markdownFormatter = new MarkdownFormatter();
-    const oddsApiKey = process.env.THE_ODDS_API_KEY?.trim();
-    this.oddsCollector = oddsApiKey ? new OddsCollector(oddsApiKey, marketConfig) : null;
     this.alerts = [];
   }
 
@@ -87,19 +74,18 @@ export class MatchDataCollector {
       match_date,
       eventId: input.eventId,
       sportKey: input.sportKey,
-      matchNewsSummary: input.matchNewsSummary?.trim() || undefined,
     };
 
     const format = (
       teamA_matches: MatchDetails[],
       teamB_matches: MatchDetails[],
       h2h_matches: H2HMatch[],
-      odds?: MatchOdds,
       teamA_season?: TeamSeasonStats | null,
       teamB_season?: TeamSeasonStats | null,
       leagueContext?: LeagueContext | null,
       refereeStats?: RefereeStats | null,
-      leagueCardContext?: LeagueCardContext | null
+      leagueCardContext?: LeagueCardContext | null,
+      lineups?: MatchLineups | null,
     ): string =>
       this.markdownFormatter.format_output(
         normalizedInput.teamA_name,
@@ -109,14 +95,13 @@ export class MatchDataCollector {
         teamB_matches,
         h2h_matches,
         this.alerts,
-        normalizedInput.matchNewsSummary,
-        odds,
         this.formatOptions,
         teamA_season ?? undefined,
         teamB_season ?? undefined,
         leagueContext ?? undefined,
         refereeStats ?? undefined,
-        leagueCardContext ?? undefined
+        leagueCardContext ?? undefined,
+        lineups ?? undefined,
       );
 
     try {
@@ -130,7 +115,7 @@ export class MatchDataCollector {
       const canFetchSeasonStats = isGoalMode && isSoccerdata;
       const canFetchCardContext = isCardMode && isSoccerdata;
 
-      const [teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext] = await Promise.all([
+      const [teamA_matches, teamB_matches, h2h_matches, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext, lineups] = await Promise.all([
         this.collectTeamMatches(teamA_id, normalizedInput.teamA_name),
         this.collectTeamMatches(teamB_id, normalizedInput.teamB_name),
         this.collectH2HMatches(
@@ -139,14 +124,6 @@ export class MatchDataCollector {
           normalizedInput.teamA_name,
           normalizedInput.teamB_name
         ),
-        this.oddsCollector
-          ? this.oddsCollector.collectOdds(
-              normalizedInput.teamA_name,
-              normalizedInput.teamB_name,
-              normalizedInput.eventId,
-              normalizedInput.sportKey,
-            )
-          : Promise.resolve(undefined),
         canFetchSeasonStats
           ? (this.provider as SoccerdataProvider).getTeamSeasonStats(normalizedInput.teamA_name).catch(() => null)
           : Promise.resolve(null),
@@ -162,9 +139,12 @@ export class MatchDataCollector {
         canFetchCardContext
           ? (this.provider as SoccerdataProvider).getLeagueCardContext(normalizedInput.teamA_name).catch(() => null)
           : Promise.resolve(null),
+        isSoccerdata
+          ? (this.provider as SoccerdataProvider).getSofascoreLineups(normalizedInput.teamA_name, normalizedInput.teamB_name, normalizedInput.match_date).catch(() => null)
+          : Promise.resolve(null),
       ]);
 
-      return format(teamA_matches, teamB_matches, h2h_matches, odds, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext);
+      return format(teamA_matches, teamB_matches, h2h_matches, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext, lineups);
     } catch (error) {
       const errorMessage = errorMsg(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);

@@ -15,8 +15,7 @@ import {
   Substitute,
   SubbedOffPlayer,
 } from '../types';
-import { MatchOdds } from '../odds/types';
-import { TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext } from '../provider/soccerdata-provider';
+import { TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext, MatchLineups, LineupSide } from '../provider/soccerdata-provider';
 
 export interface FormatOptions {
   /** Show corner data in match lines (default: true) */
@@ -75,14 +74,13 @@ export class MarkdownFormatter {
     teamB_matches: MatchDetails[],
     h2h_matches: H2HMatch[],
     alerts: string[],
-    matchNewsSummary?: string,
-    odds?: MatchOdds,
     formatOptions?: Partial<FormatOptions>,
     teamA_season?: TeamSeasonStats,
     teamB_season?: TeamSeasonStats,
     leagueContext?: LeagueContext,
     refereeStats?: RefereeStats,
-    leagueCardContext?: LeagueCardContext
+    leagueCardContext?: LeagueCardContext,
+    lineups?: MatchLineups,
   ): string {
     const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
     const isGoalMode = opts.oddsLabel === 'Goal';
@@ -90,9 +88,7 @@ export class MarkdownFormatter {
     const s: string[] = [];
 
     s.push(`# ${teamA_name} vs ${teamB_name}\n`);
-    s.push(`Date: ${match_date} | Source: ESPN API\n`);
-    s.push('---\n');
-
+    
     s.push(`## ${teamA_name} — Last 20\n`);
     s.push(this.formatTeamMatches(teamA_matches, opts));
 
@@ -154,14 +150,9 @@ export class MarkdownFormatter {
       }
     }
 
-    if (matchNewsSummary?.trim()) {
-      s.push(`## Match News\n`);
-      s.push(matchNewsSummary.trim());
-      s.push('');
-    }
-
-    if (odds) {
-      s.push(this.formatOdds(odds, opts));
+    if (lineups) {
+      s.push(`## Predicted Lineups (Sofascore)\n`);
+      s.push(this.formatLineups(lineups, teamA_name, teamB_name));
     }
 
     if (alerts.length > 0) {
@@ -898,95 +889,25 @@ export class MarkdownFormatter {
     return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   }
 
-  // ── Odds ───────────────────────────────────────────────────────────────────
+  private formatLineups(lineups: MatchLineups, teamA: string, teamB: string): string {
+    const lines: string[] = [];
 
-  private formatOdds(odds: MatchOdds, opts: FormatOptions): string {
-    const label = opts.oddsLabel;
-    const lines: string[] = [`## ${label} Odds\n`];
-
-    if (!odds.found) {
-      lines.push('Event not found — odds unavailable.\n');
-      return lines.join('\n');
-    }
-
-    if (odds.markets.length === 0) {
-      lines.push(`No ${label.toLowerCase()} markets open yet.\n`);
-      return lines.join('\n');
-    }
-
-    for (const market of odds.markets) {
-      const title = this.readableKey(market.key);
-      lines.push(`### ${title}\n`);
-
-      const allNames = market.bookmakers.flatMap(bm => bm.outcomes.map(o => o.name));
-      const isOverUnder = allNames.length > 0 && allNames.every(n => n === 'Over' || n === 'Under');
-
-      if (isOverUnder) {
-        lines.push(...this.pivotOverUnder(market.bookmakers));
-      } else {
-        lines.push(...this.flatOddsTable(market.bookmakers));
+    const formatSide = (label: string, side: LineupSide): void => {
+      const starters = side.players.filter((p) => !p.substitute);
+      const subs = side.players.filter((p) => p.substitute);
+      const formation = side.formation ? ` (${side.formation})` : '';
+      lines.push(`**${label}${formation}**: ${starters.map((p) => p.name).join(', ')}`);
+      if (subs.length > 0) {
+        lines.push(`Subs: ${subs.map((p) => p.name).join(', ')}`);
       }
-      lines.push('');
-    }
+    };
+
+    formatSide(teamA, lineups.home);
+    lines.push('');
+    formatSide(teamB, lineups.away);
+    lines.push('');
 
     return lines.join('\n');
   }
 
-  private pivotOverUnder(
-    bookmakers: MatchOdds['markets'][number]['bookmakers']
-  ): string[] {
-    const lineSet = new Set<number>();
-    for (const bm of bookmakers)
-      for (const o of bm.outcomes)
-        if (o.point !== undefined) lineSet.add(o.point);
-    const sorted = [...lineSet].sort((a, b) => a - b);
-
-    type Lookup = Map<string, Map<string, Map<number, number>>>;
-    const lk: Lookup = new Map();
-    for (const bm of bookmakers) {
-      if (!lk.has(bm.name)) lk.set(bm.name, new Map());
-      for (const o of bm.outcomes) {
-        if (o.point === undefined) continue;
-        const side = lk.get(bm.name)!;
-        if (!side.has(o.name)) side.set(o.name, new Map());
-        side.get(o.name)!.set(o.point, o.price);
-      }
-    }
-
-    const names = bookmakers.map(bm => bm.name);
-    const hdr = ['Line', ...names.flatMap(n => [`${n} O`, `${n} U`])];
-    const sep = ['---:', ...names.flatMap(() => ['---:', '---:'])];
-    const rows: string[] = [
-      `| ${hdr.join(' | ')} |`,
-      `| ${sep.join(' | ')} |`,
-    ];
-
-    for (const line of sorted) {
-      const cells: string[] = [String(line)];
-      for (const n of names) {
-        const o = lk.get(n)?.get('Over')?.get(line);
-        const u = lk.get(n)?.get('Under')?.get(line);
-        cells.push(o !== undefined ? o.toFixed(2) : '-');
-        cells.push(u !== undefined ? u.toFixed(2) : '-');
-      }
-      rows.push(`| ${cells.join(' | ')} |`);
-    }
-    return rows;
-  }
-
-  private flatOddsTable(
-    bookmakers: MatchOdds['markets'][number]['bookmakers']
-  ): string[] {
-    const rows = [
-      '| Bookmaker | Outcome | Line | Odds |',
-      '|---|---|---:|---:|',
-    ];
-    for (const bm of bookmakers) {
-      const s = [...bm.outcomes].sort((a, b) => (a.point ?? 0) - (b.point ?? 0));
-      for (const o of s) {
-        rows.push(`| ${bm.name} | ${o.name} | ${o.point ?? '-'} | ${o.price.toFixed(2)} |`);
-      }
-    }
-    return rows;
-  }
 }
