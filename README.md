@@ -27,14 +27,6 @@ Displays pre-generated analysis reports. No server or authentication — just HT
 
 Deployed to Vercel automatically via `git push` (runs `vercel-build` → `npm run build`).
 
-## Markets
-
-| Market | CLI command | Data collected | Odds markets |
-|--------|-------------|----------------|--------------|
-| Corners | `npm run corners` | corners won/conceded, xG | alt totals, alt spreads |
-| Goals | `npm run goals` | xG, npxG, shots, goals+scorers, HT scores, PPDA, deep completions | moneyline, spreads, totals, BTTS, double chance |
-| Cards | `npm run cards` | YC/RC, fouls, tackles, interceptions, card events, referee stats | alt totals, alt spreads |
-
 ## CLI Commands
 
 The CLI is useful for scripting, automation, or when you prefer the terminal.
@@ -74,9 +66,12 @@ Runs the LangChain + Tavily match news agent (absences, injuries, lineups). Writ
 ### Fetch odds
 
 ```bash
-npm run goals:odds "TeamA" "TeamB"   # odds for a specific match
-npm run goals:odds                    # list upcoming events
+npm run corners:odds "TeamA" "TeamB"         # corner odds via Claude agent (API + sportsbooks + 3rd-party)
+npm run goals:odds "TeamA" "TeamB"            # goal odds from The Odds API
+npm run goals:odds                            # list upcoming events
 ```
+
+Corner odds are collected by a Claude Code CLI agent that combines The Odds API, sportsbook website scraping (DraftKings, FanDuel, etc. via Playwright), and third-party comparison sites (sportsgambler.com, etc.). Goal and card odds use The Odds API directly for now (will be migrated in the future).
 
 Configure bookmakers via `ODDS_BOOKMAKERS` and leagues via `ODDS_SPORT_KEYS` in `.env.defaults`.
 

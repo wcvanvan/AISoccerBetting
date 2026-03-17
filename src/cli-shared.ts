@@ -10,7 +10,7 @@ const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 
 import { configureAnthropicProxy } from './agent/configure-proxy';
 import { MatchDataCollector } from './collector';
-import { runMatchNews, analyzeReport } from './agent';
+import { runMatchNews, runCornerOdds, analyzeReport } from './agent';
 import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel, resolveSportKeys } from './odds';
 import { OddsEvent } from './odds/types';
 import * as readline from 'readline';
@@ -27,6 +27,10 @@ export interface PipelineConfig {
   marketConfig: MarketConfig;
   /** System prompt for analysis */
   analysisPrompt: string;
+  /** Tavily narrative prompt for post-game results collection */
+  resultsNarrativePrompt: string;
+  /** System prompt for review/reflection generation */
+  reviewPrompt: string;
   /** Format options controlling report output */
   formatOptions: Partial<FormatOptions>;
   /** Tool name for usage text, e.g. "corners" or "goals" */
@@ -64,11 +68,27 @@ type OddsArgs = {
   teamB?: string;
 };
 
+type CornerOddsArgs = {
+  mode: 'corner-odds';
+  teamA: string;
+  teamB: string;
+};
+
 type TestArgs = {
   mode: 'test-connection';
 };
 
-type ParsedArgs = CollectArgs | AnalyzeArgs | NewsArgs | OddsArgs | TestArgs | null;
+type ResultsArgs = {
+  mode: 'results';
+  matchDir: string;
+};
+
+type ReviewArgs = {
+  mode: 'review';
+  matchDir: string;
+};
+
+type ParsedArgs = CollectArgs | AnalyzeArgs | NewsArgs | OddsArgs | CornerOddsArgs | TestArgs | ResultsArgs | ReviewArgs | null;
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -99,12 +119,48 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
     return { mode: 'news', teamA: teamA.trim(), teamB: teamB.trim() };
   }
 
+  // --corner-odds teamA teamB
+  const cornerOddsIdx = argv.indexOf('--corner-odds');
+  if (cornerOddsIdx !== -1) {
+    const [teamA, teamB] = argv.slice(cornerOddsIdx + 1, cornerOddsIdx + 3);
+    if (!teamA || !teamB) {
+      console.error('Error: --corner-odds requires two arguments: teamA teamB');
+      printUsage(toolName, marketLabel);
+      return null;
+    }
+    return { mode: 'corner-odds', teamA: teamA.trim(), teamB: teamB.trim() };
+  }
+
   // --odds [teamA teamB]
   const oddsIdx = argv.indexOf('--odds');
   if (oddsIdx !== -1) {
     const teamA = argv[oddsIdx + 1]?.trim();
     const teamB = argv[oddsIdx + 2]?.trim();
     return { mode: 'odds', teamA: teamA || undefined, teamB: teamB || undefined };
+  }
+
+  // --results <match-dir>
+  const resultsIdx = argv.indexOf('--results');
+  if (resultsIdx !== -1) {
+    const matchDir = argv[resultsIdx + 1];
+    if (!matchDir) {
+      console.error('Error: --results requires a match directory name (e.g. "man-united-vs-liverpool-2026-03-15")');
+      printUsage(toolName, marketLabel);
+      return null;
+    }
+    return { mode: 'results', matchDir: matchDir.trim() };
+  }
+
+  // --review <match-dir>
+  const reviewIdx = argv.indexOf('--review');
+  if (reviewIdx !== -1) {
+    const matchDir = argv[reviewIdx + 1];
+    if (!matchDir) {
+      console.error('Error: --review requires a match directory name (e.g. "man-united-vs-liverpool-2026-03-15")');
+      printUsage(toolName, marketLabel);
+      return null;
+    }
+    return { mode: 'review', matchDir: matchDir.trim() };
   }
 
   // --test-connection
@@ -137,16 +193,19 @@ Soccer Betting Analyzer — ${marketLabel} Markets
 ${'='.repeat(42 + marketLabel.length)}
 
 Usage:
-  npm run ${toolName} "TeamA" "TeamB"         Collect data (date auto-resolved from Odds API)
-  npm run ${toolName}:analyze <report.md>     Analyse existing report → {slug}-analysis.md
-  npm run ${toolName}:news "TeamA" "TeamB"    Fetch match news → {slug}-news.md
-  npm run ${toolName}:odds "TeamA" "TeamB"    Fetch ${marketLabel.toLowerCase()} odds for a match
-  npm run ${toolName}:odds                    List upcoming events
-  npm run test:connection                     Smoke test Claude API connection
+  npm run ${toolName} "TeamA" "TeamB"             Collect data (date auto-resolved from Odds API)
+  npm run ${toolName}:analyze <report.md>         Analyse existing report → {slug}-analysis.md
+  npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
+  npm run ${toolName}:odds "TeamA" "TeamB"        ${toolName === 'corners' ? 'Collect corner odds via agent (API + sportsbooks)' : `Fetch ${marketLabel.toLowerCase()} odds for a match`}${toolName !== 'corners' ? `
+  npm run ${toolName}:odds                        List upcoming events` : ''}
+  npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + Tavily)
+  npm run ${toolName}:review <match-dir>          Generate review (compare forecast vs actuals)
+  npm run test:connection                         Smoke test Claude API connection
 
 Arguments:
-  TeamA  - Name of the first team (e.g., "Manchester United")
-  TeamB  - Name of the second team (e.g., "Liverpool")
+  TeamA      - Name of the first team (e.g., "Manchester United")
+  TeamB      - Name of the second team (e.g., "Liverpool")
+  match-dir  - Match directory name (e.g., "man-united-vs-liverpool-2026-03-15")
 
 Prerequisites:
   pip install -r scripts/requirements.txt
@@ -161,10 +220,14 @@ Prerequisites:
 export { slug, buildMatchDir, buildReportFilename } from './utils/report-naming';
 
 import {
+  buildMatchDir,
   buildReportFilename as _buildReportFilename,
   buildAnalysisFilename as _buildAnalysisFilename,
   buildNewsFilename as _buildNewsFilename,
+  buildResultsFilename as _buildResultsFilename,
+  buildReviewFilename as _buildReviewFilename,
 } from './utils/report-naming';
+import { collectMatchResults, type MatchMeta } from './collector/match-results-collector';
 
 // ── Analysis runner ─────────────────────────────────────────────────────────
 
@@ -412,10 +475,100 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     }
   }
 
+  // ── Standalone corner-odds agent mode ──
+  if (args.mode === 'corner-odds') {
+    const resolved = await resolveEvent(args.teamA, args.teamB, marketConfig);
+    console.error(`Resolved: ${resolved.event.home_team} vs ${resolved.event.away_team} — ${resolved.leagueLabel}`);
+    const oddsFilename = path.join(REPORTS_DIR, buildMatchDir(args.teamA, args.teamB, resolved.date), 'corner-odds.md');
+    const oddsDir = path.dirname(oddsFilename);
+    if (!fs.existsSync(oddsDir)) fs.mkdirSync(oddsDir, { recursive: true });
+    try {
+      console.error('Running corner odds agent...');
+      const oddsMarkdown = await runCornerOdds(
+        resolved.event.home_team,
+        resolved.event.away_team,
+        resolved.date,
+        resolved.sportKey,
+        resolved.event.id,
+      );
+      fs.writeFileSync(oddsFilename, oddsMarkdown, 'utf8');
+      console.error(`Corner odds saved → ${oddsFilename}`);
+      process.exit(0);
+    } catch (err) {
+      const msg = errorMsg(err);
+      console.error(`Corner odds agent failed: ${msg}`);
+      process.exit(1);
+    }
+  }
+
   // ── Connection smoke test ──
   if (args.mode === 'test-connection') {
     await testConnection();
     return;
+  }
+
+  // ── Post-game results collection ──
+  if (args.mode === 'results') {
+    try {
+      const meta = readMatchMeta(args.matchDir);
+      const resultsPath = path.join(REPORTS_DIR, _buildResultsFilename(args.matchDir, toolName));
+      const resultsDir = path.dirname(resultsPath);
+      if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
+      const markdown = await collectMatchResults({
+        matchDir: args.matchDir,
+        meta,
+        market: toolName,
+        narrativePrompt: pipelineConfig.resultsNarrativePrompt,
+      });
+      fs.writeFileSync(resultsPath, markdown, 'utf8');
+      console.log(`Results saved → ${resultsPath}`);
+      process.exit(0);
+    } catch (err) {
+      const msg = errorMsg(err);
+      console.error(`Results collection failed: ${msg}`);
+      process.exit(1);
+    }
+  }
+
+  // ── Post-game review/reflection ──
+  if (args.mode === 'review') {
+    try {
+      const meta = readMatchMeta(args.matchDir);
+      const resultsPath = path.join(REPORTS_DIR, _buildResultsFilename(args.matchDir, toolName));
+      const analysisPath = path.join(REPORTS_DIR, args.matchDir, `${toolName}-analysis.md`);
+      const reviewPath = path.join(REPORTS_DIR, _buildReviewFilename(args.matchDir, toolName));
+      const reviewDir = path.dirname(reviewPath);
+      if (!fs.existsSync(reviewDir)) fs.mkdirSync(reviewDir, { recursive: true });
+
+      if (!fs.existsSync(resultsPath)) {
+        console.error(`Error: ${toolName}-results.md not found. Run "${toolName}:results ${args.matchDir}" first.`);
+        process.exit(1);
+      }
+
+      const resultsMarkdown = fs.readFileSync(resultsPath, 'utf8');
+      let analysisMarkdown = '';
+      if (fs.existsSync(analysisPath)) {
+        analysisMarkdown = fs.readFileSync(analysisPath, 'utf8');
+      } else {
+        console.warn(`Warning: ${toolName}-analysis.md not found — review will proceed without pre-game analysis.`);
+      }
+
+      // Concatenate with clear headers for the review agent
+      const combined = [
+        analysisMarkdown ? `# PRE-GAME ANALYSIS\n\n${analysisMarkdown}` : '# PRE-GAME ANALYSIS\n\n*No pre-game analysis available.*',
+        `# POST-GAME RESULTS\n\n${resultsMarkdown}`,
+      ].join('\n\n---\n\n');
+
+      console.log(`Running ${marketLabel.toLowerCase()} post-game review...`);
+      const review = await analyzeReport(combined, pipelineConfig.reviewPrompt);
+      fs.writeFileSync(reviewPath, review, 'utf8');
+      console.log(`Review saved → ${reviewPath}`);
+      process.exit(0);
+    } catch (err) {
+      const msg = errorMsg(err);
+      console.error(`Review generation failed: ${msg}`);
+      process.exit(1);
+    }
   }
 
   // ── Full collection mode ──
@@ -424,26 +577,46 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
   const provider = new SoccerdataProvider();
   try {
-    const collector = new MatchDataCollector(provider, marketConfig, formatOptions);
+    const collector = new MatchDataCollector(provider, formatOptions);
 
-    let matchNewsSummary: string | undefined;
-    if (config.matchNewsFetching) {
-      try {
-        matchNewsSummary = await runMatchNews(args.teamA, args.teamB, resolved.date);
-      } catch (err) {
-        const msg = errorMsg(err);
-        console.error(`Match news skipped: ${msg}`);
-      }
+    // Run data collection, match news, and corner odds concurrently
+    const isCornerPipeline = toolName === 'corners';
+    const [collectorResult, matchNewsSummary, agentOdds] = await Promise.all([
+      collector.collect_data({
+        teamA_name: args.teamA,
+        teamB_name: args.teamB,
+        match_date: resolved.date,
+        eventId: resolved.event.id,
+        sportKey: resolved.sportKey,
+      }),
+      config.matchNewsFetching
+        ? runMatchNews(args.teamA, args.teamB, resolved.date).catch((err) => {
+            console.error(`Match news skipped: ${errorMsg(err)}`);
+            return undefined;
+          })
+        : Promise.resolve(undefined),
+      isCornerPipeline
+        ? runCornerOdds(
+            resolved.event.home_team,
+            resolved.event.away_team,
+            resolved.date,
+            resolved.sportKey,
+            resolved.event.id,
+          ).catch((err) => {
+            console.error(`Corner odds agent skipped: ${errorMsg(err)}`);
+            return undefined;
+          })
+        : Promise.resolve(undefined),
+    ]);
+
+    // Append agent sections to the report
+    let markdown = collectorResult;
+    if (matchNewsSummary) {
+      markdown += '\n## Match News\n\n' + matchNewsSummary.trim() + '\n';
     }
-
-    const markdown = await collector.collect_data({
-      teamA_name: args.teamA,
-      teamB_name: args.teamB,
-      match_date: resolved.date,
-      eventId: resolved.event.id,
-      sportKey: resolved.sportKey,
-      matchNewsSummary,
-    });
+    if (agentOdds) {
+      markdown += '\n' + agentOdds + '\n';
+    }
 
     const reportFilename = path.join(REPORTS_DIR, _buildReportFilename(args.teamA, args.teamB, resolved.date, toolName));
     const reportDir = path.dirname(reportFilename);
@@ -453,6 +626,8 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       commenceTime: resolved.commenceTime,
       leagueKey: resolved.leagueKey,
       leagueLabel: resolved.leagueLabel,
+      homeTeam: resolved.event.home_team,
+      awayTeam: resolved.event.away_team,
     });
     console.log(`Report saved → ${reportFilename}`);
 
@@ -493,11 +668,38 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
 // ── Match metadata ───────────────────────────────────────────────────────────
 
+/** Read meta.json from a match directory. Throws if missing or incomplete. */
+function readMatchMeta(matchDir: string): MatchMeta {
+  const dirPath = path.join(REPORTS_DIR, matchDir);
+  const metaPath = path.join(dirPath, 'meta.json');
+
+  if (!fs.existsSync(metaPath)) {
+    throw new Error(`meta.json not found in ${dirPath}. Run the collection pipeline first.`);
+  }
+
+  const raw = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+
+  if (!raw.homeTeam || !raw.awayTeam) {
+    throw new Error(`meta.json in ${matchDir} is missing homeTeam/awayTeam. Re-run collection to populate.`);
+  }
+
+  return {
+    homeTeam: raw.homeTeam,
+    awayTeam: raw.awayTeam,
+    date: (raw.commenceTime || '').slice(0, 10),
+    commenceTime: raw.commenceTime || '',
+    leagueKey: raw.leagueKey || '',
+    leagueLabel: raw.leagueLabel || '',
+  };
+}
+
 /** Write meta.json with event metadata into the report directory. */
 function writeMetaJson(reportDir: string, meta: {
   commenceTime: string;
   leagueKey: string;
   leagueLabel: string;
+  homeTeam?: string;
+  awayTeam?: string;
 }): void {
   const metaPath = path.join(reportDir, 'meta.json');
   let existing: Record<string, string> = {};

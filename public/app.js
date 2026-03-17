@@ -368,11 +368,20 @@ function renderInlineMarketBadges(cell, markets) {
   let hasSome = false;
   marketNames.forEach((m) => {
     const info = markets[m];
-    if (info && (info.hasReport || info.hasAnalysis)) {
+    if (info && (info.hasReport || info.hasAnalysis || info.hasResults || info.hasReview)) {
       hasSome = true;
       const badge = document.createElement('span');
-      badge.className = 'cache-badge' + (info.hasAnalysis ? ' cache-full' : ' cache-partial');
-      badge.title = m + ': ' + (info.hasAnalysis ? 'report + analysis' : 'report only');
+      let badgeClass = ' cache-partial';
+      let title = m + ': report only';
+      if (info.hasReview) {
+        badgeClass = ' cache-reviewed';
+        title = m + ': reviewed';
+      } else if (info.hasAnalysis) {
+        badgeClass = ' cache-full';
+        title = m + ': report + analysis';
+      }
+      badge.className = 'cache-badge' + badgeClass;
+      badge.title = title;
       badge.textContent = m.charAt(0).toUpperCase() + m.slice(1);
       cell.appendChild(badge);
     }
@@ -493,8 +502,8 @@ function loadMarketData() {
   if (!currentMatch) return;
 
   const marketInfo = (currentMatch.markets || {})[currentMarket];
-  if (marketInfo && (marketInfo.hasReport || marketInfo.hasAnalysis)) {
-    renderMatchCachedResults(currentMatch, currentMarket, marketInfo.hasAnalysis);
+  if (marketInfo && (marketInfo.hasReport || marketInfo.hasAnalysis || marketInfo.hasResults || marketInfo.hasReview)) {
+    renderMatchCachedResults(currentMatch, currentMarket, marketInfo);
     return;
   }
 
@@ -507,11 +516,11 @@ function loadMarketData() {
   resultsArea.appendChild(emptyDiv);
 }
 
-function renderMatchCachedResults(match, market, hasAnalysis) {
+function renderMatchCachedResults(match, market, marketInfo) {
   const resultsArea = document.getElementById('match-results');
   const mid = match.matchId;
   const contentKey = mid + '|' + market;
-  renderResultTabs(resultsArea, hasAnalysis, (container, tab) => {
+  renderResultTabs(resultsArea, marketInfo, (container, tab) => {
     const url = 'data/reports/' + mid + '/' + market + '-' + tab + '.html';
     return loadReportTab(container, url, contentKey + ':' + tab);
   });
@@ -568,24 +577,44 @@ async function loadReportTab(container, url, cacheKey) {
   }
 }
 
-function renderResultTabs(targetEl, hasAnalysis, loadFn) {
+function renderResultTabs(targetEl, marketInfo, loadFn) {
   targetEl.textContent = '';
   const tabs = document.createElement('div');
   tabs.className = 'tabs';
 
-  const tabDefs = hasAnalysis
-    ? [
-        { key: 'concise', label: 'Value Picks' },
-        { key: 'analysis', label: 'Full Analysis' },
-        { key: 'raw', label: 'Data Report' },
-      ]
-    : [{ key: 'raw', label: 'Data Report' }];
+  // Pre-game tabs
+  const tabDefs = [];
+  if (marketInfo.hasAnalysis) {
+    tabDefs.push({ key: 'concise', label: 'Value Picks' });
+    tabDefs.push({ key: 'analysis', label: 'Full Analysis' });
+  }
+  if (marketInfo.hasReport) {
+    tabDefs.push({ key: 'raw', label: 'Data Report' });
+  }
+
+  // Post-game tabs
+  if (marketInfo.hasReview) {
+    tabDefs.push({ key: 'review-summary', label: 'Review' });
+    tabDefs.push({ key: 'review', label: 'Full Review' });
+  }
+  if (marketInfo.hasResults) {
+    tabDefs.push({ key: 'results', label: 'Match Results' });
+  }
+
+  // Fallback: at least show data report
+  if (tabDefs.length === 0) {
+    tabDefs.push({ key: 'raw', label: 'Data Report' });
+  }
 
   const content = document.createElement('div');
 
   tabDefs.forEach((t, i) => {
     const btn = document.createElement('button');
     btn.className = 'tab' + (i === 0 ? ' active' : '');
+    // Add visual separator between pre-game and post-game tabs
+    if (t.key === 'review-summary' && i > 0) {
+      btn.classList.add('tab-post-game');
+    }
     btn.textContent = t.label;
     btn.addEventListener('click', () => {
       tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));

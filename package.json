@@ -10,7 +10,7 @@
     "corners": "ts-node src/cli-corners.ts",
     "corners:analyze": "ts-node src/cli-corners.ts --analyze",
     "corners:news": "ts-node src/cli-corners.ts --news",
-    "corners:odds": "ts-node src/cli-corners.ts --odds",
+    "corners:odds": "ts-node src/cli-corners.ts --corner-odds",
     "goals": "ts-node src/cli-goals.ts",
     "goals:analyze": "ts-node src/cli-goals.ts --analyze",
     "goals:news": "ts-node src/cli-goals.ts --news",
@@ -19,6 +19,12 @@
     "cards:analyze": "ts-node src/cli-cards.ts --analyze",
     "cards:news": "ts-node src/cli-cards.ts --news",
     "cards:odds": "ts-node src/cli-cards.ts --odds",
+    "corners:results": "ts-node src/cli-corners.ts --results",
+    "corners:review": "ts-node src/cli-corners.ts --review",
+    "goals:results": "ts-node src/cli-goals.ts --results",
+    "goals:review": "ts-node src/cli-goals.ts --review",
+    "cards:results": "ts-node src/cli-cards.ts --results",
+    "cards:review": "ts-node src/cli-cards.ts --review",
     "test:connection": "ts-node src/cli-corners.ts --test-connection",
     "web": "ts-node scripts/build-web.ts --serve",
     "vercel-build": "npm run build"
@@ -44,6 +50,12 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "marked": "^17.0.4"
+    "@langchain/anthropic": "^1.3.23",
+    "@langchain/core": "^1.1.32",
+    "@langchain/tavily": "^1.2.0",
+    "@playwright/test": "^1.58.2",
+    "langchain": "^1.2.32",
+    "marked": "^17.0.4",
+    "undici": "^7.24.4"
   }
 }

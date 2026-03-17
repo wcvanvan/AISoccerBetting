@@ -79,10 +79,14 @@ export function runClaudeCli(
     });
 
     // Optional timeout: kill the subprocess if it exceeds the deadline
+    let timedOut = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     if (opts.timeoutMs) {
       timeoutId = setTimeout(() => {
+        timedOut = true;
         child.kill('SIGTERM');
+        // SIGKILL fallback in case SIGTERM is ignored
+        setTimeout(() => child.kill('SIGKILL'), 5_000);
         reject(new Error(`Claude CLI timed out after ${Math.round(opts.timeoutMs! / 1000)}s`));
       }, opts.timeoutMs);
     }
@@ -98,6 +102,7 @@ export function runClaudeCli(
 
     child.on('exit', (code) => {
       if (timeoutId) clearTimeout(timeoutId);
+      if (timedOut) return; // promise already rejected by timeout
       const output = extractAllText(stdout);
       if (!output) {
         const detail = code !== 0 ? ` (exit code ${code})` : '';

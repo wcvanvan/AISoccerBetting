@@ -4,11 +4,12 @@
 
 TypeScript CLI + web dashboard for multi-market soccer betting analysis (corners, goals, cards). Three data pipelines produce a data report, then an analysis agent identifies value bets.
 
-**Data collection** (parallel):
+**Data collection**:
 
 1. **soccerdata bridge** — Python subprocess merging ESPN (schedule, lineups, corners, goals, cards, shots, fouls) and Understat (xG, npxG, PPDA, deep completions) via the `soccerdata` library.
-2. **Match news agent** — LangChain (Claude Sonnet + Tavily) fetches absences, injuries, and tactical news from the web.
-3. **Odds** — The Odds API fetches pre-match markets from configured bookmakers.
+2. **Match news agent** — Claude Code CLI agent with web search fetches absences, injuries, and tactical news.
+3. **Corner odds agent** (corners pipeline only) — Claude Code CLI agent that combines The Odds API, sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.), and third-party comparison sites (sportsgambler.com, etc.).
+4. **Odds** (goals/cards pipelines) — The Odds API fetches pre-match markets from configured bookmakers using the Odds API (will be migrated to Claude Code CLI agent in the future).
 
 **Analysis** — Claude Opus reads the collected report (and optionally searches the web via Tavily) to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own analysis system prompt.
 
@@ -21,21 +22,25 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
  |
  +-- runPipeline (src/cli-shared.ts)
      |
-     +-- runMatchNews (src/agent/)
-     |    +-- LangChain agent: Claude Sonnet + Tavily -> absences, injuries, news
-     |
-     +-- MatchDataCollector (src/collector/match-data-collector.ts)
-     |    +-- DataProvider interface (src/provider/data-provider.ts)
-     |    |    +-- SoccerdataProvider (src/provider/soccerdata-provider.ts)
-     |    |         +-- stdin/stdout -> soccerdata_bridge.py
-     |    |              +-- sd.ESPN
-     |    |              +-- sd.Understat
-     |    |
-     |    +-- OddsCollector (src/odds/) -> market-specific odds from The Odds API
-     |    +-- MarkdownFormatter (src/formatter/) -> report.md
+     +-- Promise.all([
+     |     MatchDataCollector (src/collector/match-data-collector.ts)
+     |     |  +-- DataProvider interface (src/provider/data-provider.ts)
+     |     |  |    +-- SoccerdataProvider (src/provider/soccerdata-provider.ts)
+     |     |  |         +-- stdin/stdout -> soccerdata_bridge.py
+     |     |  |              +-- sd.ESPN
+     |     |  |              +-- sd.Understat
+     |     |  +-- MarkdownFormatter (src/formatter/) -> base report
+     |     |
+     |     runMatchNews (src/agent/match-news-client.ts)
+     |     |  +-- Claude Code CLI agent with web search -> news markdown
+     |     |
+     |     runCornerOdds (src/agent/corner-odds-client.ts) [corners only]
+     |        +-- Claude Code CLI agent -> Odds API + Playwright + 3rd-party -> odds markdown
+     |   ])
+     |   -> base report + news section + odds section (string concat)
      |
      +-- analyzeReport (src/agent/) [if ANALYSIS_ENABLED=true]
-          +-- Claude Opus + optional Tavily -> {slug}-analysis.md
+          +-- Claude Opus -> {slug}-analysis.md
 
 Web (scripts/build-web.ts -> dist/)
  |
@@ -45,7 +50,7 @@ Web (scripts/build-web.ts -> dist/)
  +-- Frontend fetches manifest.json + pre-rendered HTML files
 ```
 
-Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
+Data collection, news, and odds all run in `Promise.all` — no serial bottleneck. News and odds are appended to the base report via string concatenation.
 
 ### Provider layer (src/provider/)
 
@@ -57,15 +62,20 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 - JSON-line protocol over stdin/stdout. `DataAssembler` merges ESPN + Understat via the `soccerdata` library.
 - **Schedule**: ESPN schedule + scores.
 - **Corners / lineup / formation**: from per-game ESPN Summary JSONs.
-- **xG enrichment**: Understat `read_team_match_stats()`, merged by (date, team). Non-fatal on failure.
+- **xG enrichment**: Understat `read_team_match_stats()`, merged by (date, team).
 - **Card enrichment**: referee stats from ESPN, league-level card context from match results.
 - **Caching**: soccerdata caches HTTP responses in `~/.soccerdata/`. Set `SOCCERDATA_NO_CACHE=1` to force fresh fetches.
 
 ### Odds module (src/odds/)
 
 - `OddsApiClient` — HTTP wrapper for The Odds API v4 (`getEvents`, `getEventOdds`).
-- `OddsCollector` — finds event by fuzzy team name, fetches markets using configured `MarketConfig` keys.
+- `OddsCollector` — finds event by fuzzy team name, fetches markets using configured `MarketConfig` keys. Used by goals/cards pipelines and for event resolution. **Not used by corners pipeline** — corner odds are collected by the corner-odds agent instead.
 - `MarketConfig` — interface defining market keys and label. `CORNER_MARKET_CONFIG`, `GOAL_MARKET_CONFIG`, and `CARD_MARKET_CONFIG` constants provided.
+
+### Corner odds agent (src/agent/)
+
+- `corner-odds-client.ts` — runs a Claude Code CLI agent (`claude --print`) that collects corner odds from three sources: The Odds API (via curl), sportsbook websites (via Playwright), and third-party comparison sites. Returns a `## Corner Odds` markdown section.
+- `prompts/corner-odds-system-prompt.ts` — system prompt instructing the agent on sources, output format, and data integrity rules.
 
 ### Analysis agent (src/agent/)
 
@@ -75,8 +85,7 @@ Match data, news, and odds all run in `Promise.all` — no serial bottleneck.
 
 ### Match news agent (src/agent/)
 
-- `match-news-client.ts` — LangChain agent (Claude + Tavily tool), collects confirmed absences and tactical news only.
-- Failure is non-fatal: logged to stderr, report continues without news section.
+- `match-news-client.ts` — Claude Code CLI agent with web search, collects confirmed absences and tactical news only.
 
 ### Web (public/, scripts/build-web.ts)
 
@@ -116,7 +125,10 @@ npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
 npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
 npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
 
-# Fetch odds
+# Fetch corner odds (via Claude agent: Odds API + sportsbook scraping + 3rd-party sites)
+npm run corners:odds "TeamA" "TeamB"
+
+# Fetch odds (goals/cards — via The Odds API)
 npm run goals:odds "TeamA" "TeamB"   # specific match
 npm run goals:odds                    # list upcoming events
 
@@ -139,11 +151,17 @@ Secrets go in `.env` (git-ignored). Non-secret defaults live in `.env.defaults` 
 
 ## Output files
 
+All outputs live under `data/reports/{teamA}-vs-{teamB}-{date}/`.
+
 | File | Format | Purpose |
 |---|---|---|
-| `{slug}-{market}.md` | Compact, structured | Data report for downstream agents |
-| `{slug}-{market}-analysis.md` | Human-readable markdown | Opus betting analysis |
-| `{slug}-news.md` | Plain text with source URLs | Match news (absences, injuries) |
+| `meta.json` | JSON | Match metadata (teams, kickoff, league) |
+| `{market}.md` | Compact, structured | Data report for downstream agents |
+| `{market}-analysis.md` | Human-readable markdown | Opus betting analysis |
+| `news.md` | Plain text with source URLs | Match news (absences, injuries) |
+| `corner-odds.md` | Markdown tables | Corner odds from Odds API + sportsbook scraping |
+| `{market}-results.md` | Markdown | Post-game results (soccerdata + narrative) |
+| `{market}-review.md` | Markdown | Review comparing pre-game forecast vs actuals |
 
 ## Code conventions
 - **No inline values**: never hardcode prompts, env var names, or configuration values inline in consuming code. Always define them in a centralized module and import from there. System prompts live in `src/agent/prompts/`, market configs in `src/odds/market-config.ts`, etc.

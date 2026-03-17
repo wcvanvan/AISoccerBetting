@@ -304,6 +304,12 @@ main { padding: 20px 0; }
   background: var(--accent);
 }
 
+.tab.tab-post-game {
+  margin-left: 8px;
+  border-left: 2px solid var(--border);
+  padding-left: 24px;
+}
+
 /* ── Rendered markdown ──────────────────────────────────────────────────── */
 .markdown-body {
   font-size: 15px;
@@ -468,6 +474,11 @@ main { padding: 20px 0; }
 .cache-badge.cache-partial {
   background: var(--yellow-dim);
   color: var(--yellow);
+}
+
+.cache-badge.cache-reviewed {
+  background: rgba(8, 145, 178, 0.08);
+  color: var(--cyan);
 }
 
 .cache-none { color: var(--text-dim); font-size: 12px; }

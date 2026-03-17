@@ -163,6 +163,15 @@ function normalizeAnalysis(raw: string): string {
   return parts.join('\n\n');
 }
 
+function extractReviewSummary(markdown: string): string {
+  const lines = markdown.split('\n');
+  const idx = lines.findIndex((l) => /^#{1,4}\s*.*summary/i.test(l));
+  if (idx >= 0) return lines.slice(idx).join('\n');
+  console.warn('extractReviewSummary: no "Summary" heading found, using last 20% fallback');
+  const cutoff = Math.max(0, Math.floor(lines.length * 0.8));
+  return lines.slice(cutoff).join('\n');
+}
+
 function renderMarkdown(md: string): string {
   return wrapTables(marked.parse(md) as string);
 }
@@ -172,6 +181,8 @@ function renderMarkdown(md: string): string {
 interface MarketInfo {
   hasReport: boolean;
   hasAnalysis: boolean;
+  hasResults: boolean;
+  hasReview: boolean;
 }
 
 interface ManifestEntry {
@@ -192,7 +203,7 @@ function scanReports(): ManifestEntry[] {
   if (!fs.existsSync(REPORTS_DIR)) return [];
 
   const matchMap = new Map<string, ManifestEntry>();
-  const filePattern = /^(goals|corners|cards)(-analysis)?\.md$/;
+  const filePattern = /^(goals|corners|cards)(-analysis|-results|-review)?\.md$/;
   const dirPattern = /^(.+)-vs-(.+)-(\d{4}-\d{2}-\d{2})$/;
 
   const entries = fs.readdirSync(REPORTS_DIR, { withFileTypes: true });
@@ -210,7 +221,7 @@ function scanReports(): ManifestEntry[] {
 
     let homeTeam = unslug(homeSlug);
     let awayTeam = unslug(awaySlug);
-    const firstReport = files.find((f) => !f.includes('-analysis'));
+    const firstReport = files.find((f) => /^(goals|corners|cards)\.md$/.test(f));
     if (firstReport) {
       const parsed = parseTitle(readFirstLine(path.join(dirPath, firstReport)));
       if (parsed) { homeTeam = parsed.home; awayTeam = parsed.away; }
@@ -220,15 +231,25 @@ function scanReports(): ManifestEntry[] {
     let leagueLabel = '';
     let commenceTime = '';
     const metaPath = path.join(dirPath, 'meta.json');
+    let metaObj: Record<string, string> = {};
     if (fs.existsSync(metaPath)) {
       try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        leagueKey = meta.leagueKey || '';
-        leagueLabel = meta.leagueLabel || '';
-        commenceTime = meta.commenceTime || '';
+        metaObj = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        leagueKey = metaObj.leagueKey || '';
+        leagueLabel = metaObj.leagueLabel || '';
+        commenceTime = metaObj.commenceTime || '';
       } catch (e) {
         console.warn(`Warning: failed to parse ${metaPath}: ${(e as Error).message}`);
       }
+    }
+
+    // Backfill homeTeam/awayTeam into meta.json if missing
+    if (fs.existsSync(metaPath) && (!metaObj.homeTeam || !metaObj.awayTeam)) {
+      metaObj.homeTeam = homeTeam;
+      metaObj.awayTeam = awayTeam;
+      try {
+        fs.writeFileSync(metaPath, JSON.stringify(metaObj, null, 2) + '\n', 'utf8');
+      } catch { /* best-effort */ }
     }
 
     if (!commenceTime) {
@@ -247,8 +268,10 @@ function scanReports(): ManifestEntry[] {
       const fm = file.match(filePattern);
       if (!fm) continue;
       const [, market, isAnalysis] = fm;
-      if (!match.markets[market]) match.markets[market] = { hasReport: false, hasAnalysis: false };
-      if (isAnalysis) match.markets[market].hasAnalysis = true;
+      if (!match.markets[market]) match.markets[market] = { hasReport: false, hasAnalysis: false, hasResults: false, hasReview: false };
+      if (isAnalysis === '-analysis') match.markets[market].hasAnalysis = true;
+      else if (isAnalysis === '-results') match.markets[market].hasResults = true;
+      else if (isAnalysis === '-review') match.markets[market].hasReview = true;
       else match.markets[market].hasReport = true;
 
       const stat = fs.statSync(path.join(dirPath, file));
@@ -290,6 +313,24 @@ function buildReportHtml(matches: ManifestEntry[]): void {
         // {market}-concise.html
         const conciseMd = extractValuePicks(md);
         fs.writeFileSync(path.join(outDir, `${market}-concise.html`), renderMarkdown(conciseMd));
+      }
+
+      // Post-game results
+      const resultsPath = path.join(srcDir, `${market}-results.md`);
+      if (info.hasResults) {
+        const md = fs.readFileSync(resultsPath, 'utf8');
+        fs.writeFileSync(path.join(outDir, `${market}-results.html`), renderMarkdown(md));
+      }
+
+      // Post-game review
+      const reviewPath = path.join(srcDir, `${market}-review.md`);
+      if (info.hasReview) {
+        const rawMd = fs.readFileSync(reviewPath, 'utf8');
+        fs.writeFileSync(path.join(outDir, `${market}-review.html`), renderMarkdown(rawMd));
+
+        // {market}-review-summary.html — extracted Summary section
+        const summaryMd = extractReviewSummary(rawMd);
+        fs.writeFileSync(path.join(outDir, `${market}-review-summary.html`), renderMarkdown(summaryMd));
       }
     }
   }
