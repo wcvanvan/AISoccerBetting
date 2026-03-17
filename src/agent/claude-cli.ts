@@ -1,6 +1,6 @@
 /**
  * Shared helper for running prompts via the Claude CLI (`claude --print`).
- * Used by report-analyzer.ts when LLM_MODE=cli (the default).
+ * Used by report-analyzer.ts and match-results-collector.ts for all LLM calls.
  *
  * Uses `--output-format stream-json --verbose` and parses stdout to capture
  * all assistant text across multiple turns (e.g. when the model uses web

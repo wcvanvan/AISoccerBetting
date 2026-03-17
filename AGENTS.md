@@ -11,7 +11,7 @@ TypeScript CLI + web dashboard for multi-market soccer betting analysis (corners
 3. **Corner odds agent** (corners pipeline only) — Claude Code CLI agent that combines The Odds API, sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.), and third-party comparison sites (sportsgambler.com, etc.).
 4. **Odds** (goals/cards pipelines) — The Odds API fetches pre-match markets from configured bookmakers using the Odds API (will be migrated to Claude Code CLI agent in the future).
 
-**Analysis** — Claude Opus reads the collected report (and optionally searches the web via Tavily) to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own analysis system prompt.
+**Analysis** — Claude Opus reads the collected report via `claude --print` to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own analysis system prompt.
 
 Output: data report (`{slug}-{market}.md`), analysis (`{slug}-{market}-analysis.md`), or standalone news (`{slug}-news.md`).
 
@@ -79,7 +79,7 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 
 ### Analysis agent (src/agent/)
 
-- `report-analyzer.ts` — unified analysis entry point. `LLM_MODE=cli` (default) shells out to `claude --print`; `LLM_MODE=api` uses LangChain (Opus + optional Tavily). Both modes use the same system prompts from `prompts/`.
+- `report-analyzer.ts` — analysis entry point, shells out to `claude --print`. Uses system prompts from `prompts/`.
 - `claude-cli.ts` — shared helper for running prompts via `claude --print`.
 - `prompts/` — market-specific system prompts (corners, goals, cards).
 
@@ -132,8 +132,6 @@ npm run corners:odds "TeamA" "TeamB"
 npm run goals:odds "TeamA" "TeamB"   # specific match
 npm run goals:odds                    # list upcoming events
 
-# Test Claude API connection
-npm run test:connection
 ```
 
 ## Key Environment Variables
@@ -143,8 +141,6 @@ Secrets go in `.env` (git-ignored). Non-secret defaults live in `.env.defaults` 
 | Variable | Purpose |
 |----------|---------|
 | `THE_ODDS_API_KEY` | Betting odds (required for odds fetching) |
-| `CLAUDE_API_KEY` | Claude API for analysis/news |
-| `TAVILY_API_KEY` | Web search for match news |
 | `VERCEL_TOKEN` | Vercel deploy token (for manual deploys) |
 | `MATCH_NEWS_FETCHING` | When `true`, news collection is integrated into data pipelines. Otherwise news must be fetched separately via `:news` commands. |
 | `ANALYSIS_ENABLED` | When `true`, analysis runs automatically after data collection |

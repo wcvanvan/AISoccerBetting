@@ -1,7 +1,7 @@
 /**
  * Report file naming utilities — zero heavy dependencies.
  * Extracted from cli-shared.ts so lightweight consumers (report-paths, Vercel)
- * can resolve report paths without pulling in LangChain/soccerdata/etc.
+ * can resolve report paths without pulling in soccerdata or other heavy dependencies.
  */
 
 import * as path from 'path';

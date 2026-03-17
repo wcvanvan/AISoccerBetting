@@ -8,7 +8,6 @@ import * as fs from 'fs';
 
 const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 
-import { configureAnthropicProxy } from './agent/configure-proxy';
 import { MatchDataCollector } from './collector';
 import { runMatchNews, runCornerOdds, analyzeReport } from './agent';
 import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel, resolveSportKeys } from './odds';
@@ -16,8 +15,6 @@ import { OddsEvent } from './odds/types';
 import * as readline from 'readline';
 import { FormatOptions } from './formatter';
 import { SoccerdataProvider } from './provider';
-import { ChatAnthropic } from '@langchain/anthropic';
-import { HumanMessage } from '@langchain/core/messages';
 import { config } from './config';
 
 // ── Pipeline configuration ──────────────────────────────────────────────────
@@ -27,7 +24,7 @@ export interface PipelineConfig {
   marketConfig: MarketConfig;
   /** System prompt for analysis */
   analysisPrompt: string;
-  /** Tavily narrative prompt for post-game results collection */
+  /** Narrative prompt for post-game results collection (via Claude CLI) */
   resultsNarrativePrompt: string;
   /** System prompt for review/reflection generation */
   reviewPrompt: string;
@@ -74,10 +71,6 @@ type CornerOddsArgs = {
   teamB: string;
 };
 
-type TestArgs = {
-  mode: 'test-connection';
-};
-
 type ResultsArgs = {
   mode: 'results';
   matchDir: string;
@@ -88,7 +81,7 @@ type ReviewArgs = {
   matchDir: string;
 };
 
-type ParsedArgs = CollectArgs | AnalyzeArgs | NewsArgs | OddsArgs | CornerOddsArgs | TestArgs | ResultsArgs | ReviewArgs | null;
+type ParsedArgs = CollectArgs | AnalyzeArgs | NewsArgs | OddsArgs | CornerOddsArgs | ResultsArgs | ReviewArgs | null;
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -163,11 +156,6 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
     return { mode: 'review', matchDir: matchDir.trim() };
   }
 
-  // --test-connection
-  if (argv.includes('--test-connection')) {
-    return { mode: 'test-connection' };
-  }
-
   // collect mode: teamA teamB
   if (argv.length < 2) {
     console.error('Error: Two arguments required: teamA, teamB');
@@ -198,9 +186,8 @@ Usage:
   npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
   npm run ${toolName}:odds "TeamA" "TeamB"        ${toolName === 'corners' ? 'Collect corner odds via agent (API + sportsbooks)' : `Fetch ${marketLabel.toLowerCase()} odds for a match`}${toolName !== 'corners' ? `
   npm run ${toolName}:odds                        List upcoming events` : ''}
-  npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + Tavily)
+  npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + CLI narrative)
   npm run ${toolName}:review <match-dir>          Generate review (compare forecast vs actuals)
-  npm run test:connection                         Smoke test Claude API connection
 
 Arguments:
   TeamA      - Name of the first team (e.g., "Manchester United")
@@ -299,36 +286,6 @@ async function listOddsEvents(apiKey: string): Promise<void> {
   }
 }
 
-// ── Test connection ─────────────────────────────────────────────────────────
-
-async function testConnection(): Promise<void> {
-  const apiKey = config.anthropicApiKey;
-  if (!apiKey) {
-    console.error('Error: CLAUDE_API_KEY is not set in .env');
-    process.exit(1);
-  }
-  const model = config.analysis.model;
-  console.log(`Testing connection to ${model}...`);
-  const start = Date.now();
-  try {
-    const llm = new ChatAnthropic({ model, apiKey });
-    const result = await llm.invoke([new HumanMessage('Reply with "ok".')]);
-    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    const content =
-      typeof result.content === 'string'
-        ? result.content.trim()
-        : JSON.stringify(result.content);
-    console.log(`OK — ${model} responded in ${elapsed}s`);
-    console.log(`Response: "${content}"`);
-    process.exit(0);
-  } catch (err) {
-    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    const msg = errorMsg(err);
-    console.error(`FAILED after ${elapsed}s: ${msg}`);
-    process.exit(1);
-  }
-}
-
 // ── Event resolution ─────────────────────────────────────────────────────────
 
 interface ResolvedEvent {
@@ -401,7 +358,6 @@ async function resolveEvent(teamA: string, teamB: string, marketConfig: MarketCo
 // ── Main pipeline ───────────────────────────────────────────────────────────
 
 export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void> {
-  configureAnthropicProxy();
 
   const {
     marketConfig,
@@ -499,12 +455,6 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       console.error(`Corner odds agent failed: ${msg}`);
       process.exit(1);
     }
-  }
-
-  // ── Connection smoke test ──
-  if (args.mode === 'test-connection') {
-    await testConnection();
-    return;
   }
 
   // ── Post-game results collection ──

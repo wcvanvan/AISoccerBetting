@@ -13,10 +13,6 @@ cp .env.example .env                      # fill in your API keys
 Required keys in `.env`:
 - `THE_ODDS_API_KEY` — [the-odds-api.com](https://the-odds-api.com) (for odds markets)
 
-Optional (for API-based analysis/news — not needed with Claude Code subagents):
-- `CLAUDE_API_KEY` — [console.anthropic.com](https://console.anthropic.com)
-- `TAVILY_API_KEY` — free tier at [app.tavily.com](https://app.tavily.com)
-
 ## Web UI
 
 ```bash
@@ -51,7 +47,7 @@ npm run cards:analyze <report.md>
 
 Reads an existing report and runs Claude Opus analysis. Writes `{slug}-{market}-analysis.md`.
 
-When running from Claude Code, analysis and news collection can use subagents instead of API calls (no CLAUDE_API_KEY needed).
+Analysis and news collection use the Claude Code CLI (`claude --print`) — no Anthropic API key required.
 
 ### Fetch match news
 
@@ -61,7 +57,7 @@ npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
 npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
 ```
 
-Runs the LangChain + Tavily match news agent (absences, injuries, lineups). Writes `{slug}-news.md`.
+Runs the Claude Code CLI news agent (absences, injuries, lineups). Writes `{slug}-news.md`.
 
 ### Fetch odds
 
@@ -74,12 +70,6 @@ npm run goals:odds                            # list upcoming events
 Corner odds are collected by a Claude Code CLI agent that combines The Odds API, sportsbook website scraping (DraftKings, FanDuel, etc. via Playwright), and third-party comparison sites (sportsgambler.com, etc.). Goal and card odds use The Odds API directly for now (will be migrated in the future).
 
 Configure bookmakers via `ODDS_BOOKMAKERS` and leagues via `ODDS_SPORT_KEYS` in `.env.defaults`.
-
-### Test Claude API connection
-
-```bash
-npm run test:connection
-```
 
 ## Data Sources
 
@@ -94,9 +84,7 @@ Non-secret defaults live in `.env.defaults` (committed). Secrets go in `.env` (g
 | Variable | Purpose |
 |----------|---------|
 | `THE_ODDS_API_KEY` | Betting odds (required for odds) |
-| `CLAUDE_API_KEY` | Claude API for analysis/news |
-| `TAVILY_API_KEY` | Web search for match news |
 | `ANALYSIS_MODEL` | Claude model for analysis (default: claude-opus-4-6) |
-| `WEB_SEARCH_MODEL` | Claude model for news (default: claude-sonnet-4-6) |
+| `WEB_SEARCH_MODEL` | Claude model for news (default: claude-opus-4-6) |
 
 See `.env.defaults` for all configurable options.

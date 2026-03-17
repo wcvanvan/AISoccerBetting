@@ -25,7 +25,6 @@
     "goals:review": "ts-node src/cli-goals.ts --review",
     "cards:results": "ts-node src/cli-cards.ts --results",
     "cards:review": "ts-node src/cli-cards.ts --review",
-    "test:connection": "ts-node src/cli-corners.ts --test-connection",
     "web": "ts-node scripts/build-web.ts --serve",
     "vercel-build": "npm run build"
   },
@@ -50,12 +49,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@langchain/anthropic": "^1.3.23",
-    "@langchain/core": "^1.1.32",
-    "@langchain/tavily": "^1.2.0",
     "@playwright/test": "^1.58.2",
-    "langchain": "^1.2.32",
-    "marked": "^17.0.4",
-    "undici": "^7.24.4"
+    "marked": "^17.0.4"
   }
 }
