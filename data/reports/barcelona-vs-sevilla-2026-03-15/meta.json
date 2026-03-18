@@ -1,5 +1,7 @@
 {
   "commenceTime": "2026-03-15T15:15:00Z",
   "leagueKey": "soccer_spain_la_liga",
-  "leagueLabel": "La Liga"
+  "leagueLabel": "La Liga",
+  "homeTeam": "Barcelona",
+  "awayTeam": "Sevilla"
 }

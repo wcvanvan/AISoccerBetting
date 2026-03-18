@@ -1,5 +1,7 @@
 {
   "leagueKey": "soccer_uefa_champs_league",
   "leagueLabel": "Champions League",
-  "commenceTime": "2026-03-11T20:00:00Z"
+  "commenceTime": "2026-03-11T20:00:00Z",
+  "homeTeam": "Paris Saint Germain",
+  "awayTeam": "Chelsea"
 }

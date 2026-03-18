@@ -1,5 +1,7 @@
 {
   "leagueKey": "soccer_italy_serie_a",
   "leagueLabel": "Serie A",
-  "commenceTime": "2026-03-13T19:45:00Z"
+  "commenceTime": "2026-03-13T19:45:00Z",
+  "homeTeam": "Torino",
+  "awayTeam": "Parma"
 }
