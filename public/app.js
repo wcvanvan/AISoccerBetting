@@ -368,17 +368,14 @@ function renderInlineMarketBadges(cell, markets) {
   let hasSome = false;
   marketNames.forEach((m) => {
     const info = markets[m];
-    if (info && (info.hasReport || info.hasPrediction || info.hasResults || info.hasReview)) {
+    if (info && (info.hasPrediction || info.hasReview)) {
       hasSome = true;
       const badge = document.createElement('span');
-      let badgeClass = ' cache-partial';
-      let title = m + ': report only';
+      let badgeClass = ' cache-full';
+      let title = m + ': prediction';
       if (info.hasReview) {
         badgeClass = ' cache-reviewed';
         title = m + ': reviewed';
-      } else if (info.hasPrediction) {
-        badgeClass = ' cache-full';
-        title = m + ': report + prediction';
       }
       badge.className = 'cache-badge' + badgeClass;
       badge.title = title;
@@ -401,7 +398,13 @@ function openMatchPage(matchData) {
 
   if (!isSameMatch) {
     tabCache = {};
-    currentMarket = 'goals';
+    // Default to first market that has data
+    const markets = matchData.markets || {};
+    const firstAvailable = ['goals', 'corners', 'cards'].find((mk) => {
+      const info = markets[mk];
+      return info && (info.hasPrediction || info.hasReview);
+    });
+    currentMarket = firstAvailable || 'goals';
   }
 
   currentMatch = matchData;
@@ -468,7 +471,10 @@ function renderMatchPage() {
 
   const marketTabs = document.createElement('div');
   marketTabs.className = 'market-tabs';
+  const allMarkets = currentMatch.markets || {};
   ['goals', 'corners', 'cards'].forEach((mk) => {
+    const info = allMarkets[mk];
+    if (!info || (!info.hasPrediction && !info.hasReview)) return; // hide empty markets
     const tab = document.createElement('button');
     tab.className = 'market-tab' + (mk === currentMarket ? ' active' : '');
     tab.textContent = mk.charAt(0).toUpperCase() + mk.slice(1);
@@ -502,7 +508,7 @@ function loadMarketData() {
   if (!currentMatch) return;
 
   const marketInfo = (currentMatch.markets || {})[currentMarket];
-  if (marketInfo && (marketInfo.hasReport || marketInfo.hasPrediction || marketInfo.hasResults || marketInfo.hasReview)) {
+  if (marketInfo && (marketInfo.hasPrediction || marketInfo.hasReview)) {
     renderMatchCachedResults(currentMatch, currentMarket, marketInfo);
     return;
   }
@@ -590,50 +596,43 @@ function renderResultTabs(targetEl, marketInfo, loadFn) {
   const tabs = document.createElement('div');
   tabs.className = 'tabs';
 
-  // Pre-game tabs
+  // User-facing tabs: Prediction + Review
   const tabDefs = [];
   if (marketInfo.hasPrediction) {
-    tabDefs.push({ key: 'concise', label: 'Value Picks' });
-    tabDefs.push({ key: 'prediction', label: 'Full Prediction' });
+    tabDefs.push({ key: 'prediction-presentation', label: 'Prediction' });
   }
-  if (marketInfo.hasReport) {
-    tabDefs.push({ key: 'raw', label: 'Data Report' });
-  }
-
-  // Post-game tabs
-  if (marketInfo.hasReview) {
-    tabDefs.push({ key: 'review-summary', label: 'Review' });
-    tabDefs.push({ key: 'review', label: 'Full Review' });
-  }
-  if (marketInfo.hasResults) {
-    tabDefs.push({ key: 'results', label: 'Match Results' });
-  }
-
-  // Fallback: at least show data report
-  if (tabDefs.length === 0) {
-    tabDefs.push({ key: 'raw', label: 'Data Report' });
-  }
+  tabDefs.push({ key: 'review-presentation', label: 'Review', placeholder: !marketInfo.hasReview });
 
   const content = document.createElement('div');
+
+  function showTab(t) {
+    if (t.placeholder) {
+      content.textContent = '';
+      const msg = document.createElement('div');
+      msg.className = 'empty-state';
+      const p = document.createElement('p');
+      p.textContent = 'The post-match review will be available after the game is played.';
+      msg.appendChild(p);
+      content.appendChild(msg);
+    } else {
+      loadFn(content, t.key);
+    }
+  }
 
   tabDefs.forEach((t, i) => {
     const btn = document.createElement('button');
     btn.className = 'tab' + (i === 0 ? ' active' : '');
-    // Add visual separator between pre-game and post-game tabs
-    if (t.key === 'review-summary' && i > 0) {
-      btn.classList.add('tab-post-game');
-    }
     btn.textContent = t.label;
     btn.addEventListener('click', () => {
       tabs.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      loadFn(content, t.key);
+      showTab(t);
     });
     tabs.appendChild(btn);
   });
 
   targetEl.append(tabs, content);
-  return loadFn(content, tabDefs[0].key);
+  showTab(tabDefs[0]);
 }
 
 // ── Utilities ───────────────────────────────────────────────────────────────

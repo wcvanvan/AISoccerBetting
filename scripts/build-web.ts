@@ -301,51 +301,32 @@ function buildReportHtml(matches: ManifestEntry[]): void {
       if (!info) continue;
 
       const srcDir = path.join(REPORTS_DIR, match.matchId);
-      const reportPath = path.join(srcDir, `${market}.md`);
       const predictionPath = path.join(srcDir, `${market}-prediction.md`);
 
-      if (info.hasReport) {
-        const md = fs.readFileSync(reportPath, 'utf8');
-        fs.writeFileSync(path.join(outDir, `${market}-raw.html`), renderMarkdown(md));
-      }
-
+      // Only build user-facing presentation files
       if (info.hasPrediction) {
         const rawMd = fs.readFileSync(predictionPath, 'utf8');
         const md = normalizePrediction(rawMd);
-        fs.writeFileSync(path.join(outDir, `${market}-prediction.html`), renderMarkdown(md));
-
-        // {market}-concise.html — prefer presentation file over extracted value picks
         const presentationPath = path.join(srcDir, `${market}-prediction-presentation.md`);
         if (info.hasPredictionPresentation) {
           const presentationMd = fs.readFileSync(presentationPath, 'utf8');
-          fs.writeFileSync(path.join(outDir, `${market}-concise.html`), renderMarkdown(presentationMd));
+          fs.writeFileSync(path.join(outDir, `${market}-prediction-presentation.html`), renderMarkdown(presentationMd));
         } else {
           const conciseMd = extractValuePicks(md);
-          fs.writeFileSync(path.join(outDir, `${market}-concise.html`), renderMarkdown(conciseMd));
+          fs.writeFileSync(path.join(outDir, `${market}-prediction-presentation.html`), renderMarkdown(conciseMd));
         }
       }
 
-      // Post-game results
-      const resultsPath = path.join(srcDir, `${market}-results.md`);
-      if (info.hasResults) {
-        const md = fs.readFileSync(resultsPath, 'utf8');
-        fs.writeFileSync(path.join(outDir, `${market}-results.html`), renderMarkdown(md));
-      }
-
-      // Post-game review
-      const reviewPath = path.join(srcDir, `${market}-review.md`);
       if (info.hasReview) {
+        const reviewPath = path.join(srcDir, `${market}-review.md`);
         const rawMd = fs.readFileSync(reviewPath, 'utf8');
-        fs.writeFileSync(path.join(outDir, `${market}-review.html`), renderMarkdown(rawMd));
-
-        // {market}-review-summary.html — prefer presentation file over extracted summary
         const reviewPresentationPath = path.join(srcDir, `${market}-review-presentation.md`);
         if (info.hasReviewPresentation) {
           const reviewPresentationMd = fs.readFileSync(reviewPresentationPath, 'utf8');
-          fs.writeFileSync(path.join(outDir, `${market}-review-summary.html`), renderMarkdown(reviewPresentationMd));
+          fs.writeFileSync(path.join(outDir, `${market}-review-presentation.html`), renderMarkdown(reviewPresentationMd));
         } else {
           const summaryMd = extractReviewSummary(rawMd);
-          fs.writeFileSync(path.join(outDir, `${market}-review-summary.html`), renderMarkdown(summaryMd));
+          fs.writeFileSync(path.join(outDir, `${market}-review-presentation.html`), renderMarkdown(summaryMd));
         }
       }
     }

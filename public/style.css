@@ -304,11 +304,6 @@ main { padding: 20px 0; }
   background: var(--accent);
 }
 
-.tab.tab-post-game {
-  margin-left: 8px;
-  border-left: 2px solid var(--border);
-  padding-left: 24px;
-}
 
 /* ── Rendered markdown ──────────────────────────────────────────────────── */
 .markdown-body {
@@ -939,7 +934,7 @@ a:focus-visible {
 .comment-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   margin-top: 6px;
 }
 
@@ -953,7 +948,7 @@ a:focus-visible {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 4px;
   border-radius: 4px;
   transition: all 0.1s;
 }
@@ -981,14 +976,14 @@ a:focus-visible {
   font-weight: 700;
   color: var(--text);
   font-family: var(--mono);
-  min-width: 16px;
+  min-width: 14px;
   text-align: center;
-  padding: 0 2px;
+  padding: 0 1px;
 }
 
 /* Reply & delete overrides */
 .comment-reply-link {
-  margin-left: 6px;
+  margin-left: 8px;
 }
 
 .comment-reply-link:hover {
