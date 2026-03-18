@@ -55,7 +55,7 @@ function extractValuePicks(markdown: string): string {
   return lines.slice(cutoff).join('\n');
 }
 
-function normalizeAnalysis(raw: string): string {
+function normalizePrediction(raw: string): string {
   // 1. Strip preamble — remove everything before the first heading
   let text = raw.replace(/^[\s\S]*?(?=^#\s)/m, '');
 
@@ -180,9 +180,11 @@ function renderMarkdown(md: string): string {
 
 interface MarketInfo {
   hasReport: boolean;
-  hasAnalysis: boolean;
+  hasPrediction: boolean;
   hasResults: boolean;
   hasReview: boolean;
+  hasPredictionPresentation: boolean;
+  hasReviewPresentation: boolean;
 }
 
 interface ManifestEntry {
@@ -203,7 +205,7 @@ function scanReports(): ManifestEntry[] {
   if (!fs.existsSync(REPORTS_DIR)) return [];
 
   const matchMap = new Map<string, ManifestEntry>();
-  const filePattern = /^(goals|corners|cards)(-analysis|-results|-review)?\.md$/;
+  const filePattern = /^(goals|corners|cards)(-prediction|-results|-review|-prediction-presentation|-review-presentation)?\.md$/;
   const dirPattern = /^(.+)-vs-(.+)-(\d{4}-\d{2}-\d{2})$/;
 
   const entries = fs.readdirSync(REPORTS_DIR, { withFileTypes: true });
@@ -268,8 +270,10 @@ function scanReports(): ManifestEntry[] {
       const fm = file.match(filePattern);
       if (!fm) continue;
       const [, market, isAnalysis] = fm;
-      if (!match.markets[market]) match.markets[market] = { hasReport: false, hasAnalysis: false, hasResults: false, hasReview: false };
-      if (isAnalysis === '-analysis') match.markets[market].hasAnalysis = true;
+      if (!match.markets[market]) match.markets[market] = { hasReport: false, hasPrediction: false, hasResults: false, hasReview: false, hasPredictionPresentation: false, hasReviewPresentation: false };
+      if (isAnalysis === '-prediction-presentation') match.markets[market].hasPredictionPresentation = true;
+      else if (isAnalysis === '-review-presentation') match.markets[market].hasReviewPresentation = true;
+      else if (isAnalysis === '-prediction') match.markets[market].hasPrediction = true;
       else if (isAnalysis === '-results') match.markets[market].hasResults = true;
       else if (isAnalysis === '-review') match.markets[market].hasReview = true;
       else match.markets[market].hasReport = true;
@@ -298,21 +302,27 @@ function buildReportHtml(matches: ManifestEntry[]): void {
 
       const srcDir = path.join(REPORTS_DIR, match.matchId);
       const reportPath = path.join(srcDir, `${market}.md`);
-      const analysisPath = path.join(srcDir, `${market}-analysis.md`);
+      const predictionPath = path.join(srcDir, `${market}-prediction.md`);
 
       if (info.hasReport) {
         const md = fs.readFileSync(reportPath, 'utf8');
         fs.writeFileSync(path.join(outDir, `${market}-raw.html`), renderMarkdown(md));
       }
 
-      if (info.hasAnalysis) {
-        const rawMd = fs.readFileSync(analysisPath, 'utf8');
-        const md = normalizeAnalysis(rawMd);
-        fs.writeFileSync(path.join(outDir, `${market}-analysis.html`), renderMarkdown(md));
+      if (info.hasPrediction) {
+        const rawMd = fs.readFileSync(predictionPath, 'utf8');
+        const md = normalizePrediction(rawMd);
+        fs.writeFileSync(path.join(outDir, `${market}-prediction.html`), renderMarkdown(md));
 
-        // {market}-concise.html
-        const conciseMd = extractValuePicks(md);
-        fs.writeFileSync(path.join(outDir, `${market}-concise.html`), renderMarkdown(conciseMd));
+        // {market}-concise.html — prefer presentation file over extracted value picks
+        const presentationPath = path.join(srcDir, `${market}-prediction-presentation.md`);
+        if (info.hasPredictionPresentation) {
+          const presentationMd = fs.readFileSync(presentationPath, 'utf8');
+          fs.writeFileSync(path.join(outDir, `${market}-concise.html`), renderMarkdown(presentationMd));
+        } else {
+          const conciseMd = extractValuePicks(md);
+          fs.writeFileSync(path.join(outDir, `${market}-concise.html`), renderMarkdown(conciseMd));
+        }
       }
 
       // Post-game results
@@ -328,9 +338,15 @@ function buildReportHtml(matches: ManifestEntry[]): void {
         const rawMd = fs.readFileSync(reviewPath, 'utf8');
         fs.writeFileSync(path.join(outDir, `${market}-review.html`), renderMarkdown(rawMd));
 
-        // {market}-review-summary.html — extracted Summary section
-        const summaryMd = extractReviewSummary(rawMd);
-        fs.writeFileSync(path.join(outDir, `${market}-review-summary.html`), renderMarkdown(summaryMd));
+        // {market}-review-summary.html — prefer presentation file over extracted summary
+        const reviewPresentationPath = path.join(srcDir, `${market}-review-presentation.md`);
+        if (info.hasReviewPresentation) {
+          const reviewPresentationMd = fs.readFileSync(reviewPresentationPath, 'utf8');
+          fs.writeFileSync(path.join(outDir, `${market}-review-summary.html`), renderMarkdown(reviewPresentationMd));
+        } else {
+          const summaryMd = extractReviewSummary(rawMd);
+          fs.writeFileSync(path.join(outDir, `${market}-review-summary.html`), renderMarkdown(summaryMd));
+        }
       }
     }
   }
@@ -340,7 +356,7 @@ function buildReportHtml(matches: ManifestEntry[]): void {
 // ── Copy assets ───────────────────────────────────────────────────────────
 
 function copyAssets(): void {
-  for (const file of ['index.html', 'app.js', 'style.css']) {
+  for (const file of ['index.html', 'app.js', 'style.css', 'profanity.js', 'comments.js', 'footballer-names.json', 'profanity-list.json']) {
     const src = path.join(PUBLIC_DIR, file);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(DIST_DIR, file));

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 soccerdata bridge — reads JSON-line requests from stdin, writes JSON-line
-responses to stdout.  Merges data from ESPN (via soccerdata) and Understat (xG)
-into the MatchDetails / H2HMatch shapes that the TypeScript pipeline expects.
+responses to stdout.  Merges data from Sofascore (schedule, stats, lineups,
+incidents) and Understat (xG) into the MatchDetails / H2HMatch shapes that
+the TypeScript pipeline expects.
 
 Protocol:
   stdin  → {"method": "...", "params": {...}, "id": 1}
@@ -16,7 +17,7 @@ import logging
 import os
 import sys
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -35,20 +36,29 @@ for _name in ("tls_requests", "tls_client", "TLSLibrary", "urllib3", "soccerdata
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
+# Priority order: domestic leagues first (library-cached, fast), then cups/European comps (API-fetched, slower)
 DEFAULT_LEAGUES = [
+    # Domestic leagues — fast (library's read_schedule with caching)
     "ENG-Premier League",
     "ESP-La Liga",
     "GER-Bundesliga",
     "ITA-Serie A",
     "FRA-Ligue 1",
-    "ENG-FA Cup",
-    "ENG-League Cup",
+    # European comps — API-fetched (may be rate-limited on cold start)
     "INT-Champions League",
     "INT-Europa League",
     "INT-Conference League",
+    # Domestic cups — API-fetched (lower priority, may be skipped on cold start)
+    "ENG-FA Cup",
+    "ENG-League Cup",
+    "ESP-Copa del Rey",
+    "ITA-Coppa Italia",
+    "FRA-Coupe de France",
+    # Domestic super cups — API-fetched (1-2 matches per team per season)
+    "ESP-Supercopa de Espana",
 ]
 
-SOURCES = ["espn", "understat"]
+SOURCES = ["sofascore", "understat"]
 
 # Understat only covers the big 5 European leagues
 UNDERSTAT_LEAGUES = [
@@ -180,230 +190,188 @@ class DataAssembler:
             self._sofascore = sd.Sofascore(sofascore_leagues, sofascore_season)
         return self._sofascore
 
-    def _get_schedule(self):
-        """Return a cached schedule DataFrame with scores.
+    def _get_sofascore_schedule(self):
+        """Return a cached Sofascore schedule DataFrame with scores.
 
-        Uses a custom schedule fetcher instead of soccerdata's read_schedule()
-        because the latter crashes on cup/European competitions whose ESPN
-        calendar uses dict entries (rounds) instead of flat date strings.
+        Some leagues (e.g. La Liga) cause errors in Sofascore's season
+        parser due to old historical season codes.  We handle this by
+        falling back to per-league fetching and skipping leagues that fail.
         """
         if self._schedule is None:
-            log.info("Fetching ESPN schedule...")
-            self._schedule = self._fetch_schedule_all()
-            self._schedule = self._add_scores(self._schedule)
+            log.info("Fetching Sofascore schedule...")
+            try:
+                ss = self._get_sofascore()
+                self._schedule = ss.read_schedule()
+            except (ValueError, Exception) as exc:
+                log.warning("Batch schedule fetch failed (%s), falling back to per-league", exc)
+                self._schedule = self._fetch_sofascore_schedule_per_league()
         return self._schedule
 
-    def _fetch_schedule_all(self) -> pd.DataFrame:
-        """Fetch schedule for all leagues/seasons, handling both calendar formats.
+    # Sofascore tournament IDs for direct API fallback
+    _SOFASCORE_TOURNAMENTS: dict[str, int] = {
+        "ENG-Premier League": 17,
+        "ESP-La Liga": 8,
+        "GER-Bundesliga": 35,
+        "ITA-Serie A": 23,
+        "FRA-Ligue 1": 34,
+        "INT-Champions League": 7,
+        "INT-Europa League": 679,
+        "INT-Conference League": 17015,
+        "ENG-FA Cup": 19,
+        "ENG-League Cup": 21,
+        "ESP-Copa del Rey": 329,
+        "ITA-Coppa Italia": 328,
+        "FRA-Coupe de France": 335,
+        "ESP-Supercopa de Espana": 213,
+    }
 
-        Regular leagues (EPL, La Liga, etc.) return a flat list of date strings.
-        Cups (FA Cup, UCL, etc.) return a list of round dicts with startDate/endDate.
+    def _fetch_sofascore_schedule_per_league(self) -> pd.DataFrame:
+        """Fetch Sofascore schedule, splitting into library-supported and API-fetched.
+
+        1. Library-supported leagues (PL, Bundesliga, Serie A, Ligue 1): one read_schedule() each.
+           La Liga falls back to direct API due to a soccerdata library bug.
+        2. Cups/European comps: direct API via /events/last/ endpoint.
         """
-        import itertools
+        import soccerdata as sd
+        import time as _time
+        available = {lg for lg in sd.Sofascore.available_leagues()}
+        current = self._seasons[0]
+        sofascore_season = f"{current}-{int(current)+1}"
 
-        espn = self._get_espn()
-        force_cache = os.environ.get("SOCCERDATA_NO_CACHE") != "1"
-        api_base = "http://site.api.espn.com/apis/site/v2/sports/soccer"
+        frames: list[pd.DataFrame] = []
+        api_leagues: list[str] = []  # leagues needing direct API
+
+        # Phase 1: Library-supported leagues (fast, cached)
+        for league in self._leagues:
+            if league not in available:
+                if league in self._SOFASCORE_TOURNAMENTS:
+                    api_leagues.append(league)
+                continue
+            try:
+                ss = sd.Sofascore([league], sofascore_season)
+                df = ss.read_schedule()
+                if not df.empty:
+                    frames.append(df)
+                    log.info("Loaded %d matches from %s", len(df), league)
+            except Exception as exc:
+                log.warning("read_schedule failed for %s: %s", league, exc)
+                if league in self._SOFASCORE_TOURNAMENTS:
+                    api_leagues.append(league)
+
+        # Phase 2: Direct API leagues (cups, European comps, failed domestic)
+        for league in api_leagues:
+            _time.sleep(1)  # rate-limit between API leagues
+            try:
+                df = self._fetch_league_via_api(league)
+                if not df.empty:
+                    frames.append(df)
+                    log.info("Loaded %d matches from %s via direct API", len(df), league)
+            except Exception as exc:
+                log.warning("Skipped %s: %s", league, exc)
+
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames)
+
+    def _fetch_league_via_api(self, league: str) -> pd.DataFrame:
+        """Fetch schedule directly from Sofascore API for a league.
+
+        Uses the /events/last/{page} endpoint which returns all completed
+        matches (group stages + knockout rounds) in reverse chronological
+        order, paginated 30 per page.
+        """
+        import json as _json
+        from datetime import timezone
+
+        tid = self._SOFASCORE_TOURNAMENTS.get(league)
+        if tid is None:
+            log.warning("No tournament ID for %s, skipping", league)
+            return pd.DataFrame()
+
+        try:
+            ss = self._get_sofascore()
+        except Exception:
+            return pd.DataFrame()
+
+        # Find the current season ID
+        seasons_url = f"https://api.sofascore.com/api/v1/unique-tournament/{tid}/seasons"
+        try:
+            resp = ss.get(seasons_url)
+            seasons_data = _json.load(resp)
+            season_id = seasons_data["seasons"][0]["id"]
+        except Exception as exc:
+            log.warning("Failed to get season ID for %s: %s", league, exc)
+            return pd.DataFrame()
+
+        # Fetch completed events page by page (most recent first)
+        import time as _time
         rows: list[dict[str, Any]] = []
-
-        for league_name, lkey in espn._selected_leagues.items():
-            for skey in espn.seasons:
-                # Determine start_date for initial calendar fetch
-                year_prefix = int(skey[:2])
-                if year_prefix > int(str(datetime.now().year + 1)[-2:]):
-                    start_date = f"19{skey[:2]}0701"
-                else:
-                    start_date = f"20{skey[:2]}0701"
-
-                url = f"{api_base}/{lkey}/scoreboard?dates={start_date}"
-                filepath = espn.data_dir / f"Schedule_{lkey}_{start_date}.json"
-                try:
-                    reader = espn.get(url, filepath)
-                    data = json.load(reader)
-                except Exception as exc:
-                    log.warning("Failed to fetch calendar for %s/%s: %s", lkey, skey, exc)
-                    continue
-
-                calendar = data.get("leagues", [{}])[0].get("calendar", [])
-                if not calendar:
-                    continue
-
-                # Determine calendar format: string dates vs dict rounds
-                if isinstance(calendar[0], str):
-                    # Regular league: flat list of date strings
-                    match_dates = []
-                    for d in calendar:
-                        try:
-                            match_dates.append(
-                                datetime.strptime(d, "%Y-%m-%dT%H:%MZ").strftime("%Y%m%d")
-                            )
-                        except (ValueError, TypeError):
+        seen_ids: set[int] = set()
+        max_pages = 3  # 3 pages × 30 = 90 events (enough for cups and most league seasons)
+        for page in range(max_pages):
+            url = f"https://api.sofascore.com/api/v1/unique-tournament/{tid}/season/{season_id}/events/last/{page}"
+            try:
+                filepath = ss.data_dir / f"SeasonEvents_{tid}_{season_id}_last_{page}.json"
+                # Retry once on TLS errors (rate limiting), then give up
+                resp = None
+                for attempt in range(2):
+                    try:
+                        resp = ss.get(url, filepath)
+                        break
+                    except Exception as tls_exc:
+                        if attempt == 0 and "TLS" in str(tls_exc):
+                            _time.sleep(3)
                             continue
-                    self._fetch_schedule_dates(
-                        espn, api_base, lkey, skey, match_dates, rows, force_cache
-                    )
-                else:
-                    # Cup/European competition: dict entries with rounds
-                    self._fetch_schedule_rounds(
-                        espn, api_base, lkey, skey, calendar, rows, force_cache
-                    )
+                        raise
+                if resp is None:
+                    break
+                data = _json.load(resp)
+                events = data.get("events", [])
+                if not events:
+                    break
+                for ev in events:
+                    game_id = ev.get("id")
+                    if game_id in seen_ids:
+                        continue
+                    seen_ids.add(game_id)
+
+                    home = ev.get("homeTeam", {}).get("name", "")
+                    away = ev.get("awayTeam", {}).get("name", "")
+                    start_ts = ev.get("startTimestamp")
+                    date_str = None
+                    if start_ts:
+                        date_str = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
+
+                    home_score = ev.get("homeScore", {}).get("current")
+                    away_score = ev.get("awayScore", {}).get("current")
+
+                    rows.append({
+                        "league": league,
+                        "season": self._seasons[0],
+                        "date": date_str,
+                        "home_team": home,
+                        "away_team": away,
+                        "home_score": home_score,
+                        "away_score": away_score,
+                        "game_id": game_id,
+                    })
+
+                if not data.get("hasNextPage", False):
+                    break
+                _time.sleep(0.5)  # rate-limit between pages
+            except Exception as exc:
+                log.warning("Failed to fetch %s page %d: %s", league, page, exc)
+                break
 
         if not rows:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
-        # Deduplicate by game_id (cup round date ranges can overlap)
-        df = df.drop_duplicates(subset=["game_id"], keep="first")
-        # Translate league slugs back to canonical names (e.g. eng.1 → ENG-Premier League)
-        slug_to_name = {v: k for k, v in espn._selected_leagues.items()}
-        df["league"] = df["league"].map(lambda s: slug_to_name.get(s, s))
         df["date"] = pd.to_datetime(df["date"])
-        df = df.dropna(subset=["home_team", "away_team", "date"])
         df["game"] = df.apply(
-            lambda r: f"{r['date'].strftime('%Y-%m-%d')} {r['home_team']}-{r['away_team']}", axis=1
+            lambda r: f"{r['date'].strftime('%Y-%m-%d') if pd.notna(r['date']) else ''} {r['home_team']}-{r['away_team']}", axis=1
         )
         df = df.set_index(["league", "season", "game"]).sort_index()
-        return df
-
-    def _fetch_schedule_dates(
-        self,
-        espn,
-        api_base: str,
-        lkey: str,
-        skey: str,
-        dates: list[str],
-        rows: list[dict[str, Any]],
-        force_cache: bool,
-    ) -> None:
-        """Fetch schedule pages for a flat list of date strings (regular leagues)."""
-        for date in dates:
-            url = f"{api_base}/{lkey}/scoreboard?dates={date}"
-            filepath = espn.data_dir / f"Schedule_{lkey}_{date}.json"
-            try:
-                current_season = not espn._is_complete(lkey, skey)
-                reader = espn.get(url, filepath, no_cache=current_season and not force_cache)
-                data = json.load(reader)
-                for e in data.get("events", []):
-                    self._parse_event(e, lkey, skey, rows)
-            except Exception as exc:
-                log.debug("Failed to fetch %s/%s: %s", lkey, date, exc)
-
-    def _fetch_schedule_rounds(
-        self,
-        espn,
-        api_base: str,
-        lkey: str,
-        skey: str,
-        calendar: list,
-        rows: list[dict[str, Any]],
-        force_cache: bool,
-    ) -> None:
-        """Fetch schedule pages for cup competitions with round-based calendars.
-
-        Each calendar item is a dict with 'entries' containing rounds.
-        Each round has startDate/endDate; we split large ranges into monthly
-        chunks to avoid hitting ESPN's ~100-event-per-request limit.
-        """
-        for cal_item in calendar:
-            entries = cal_item.get("entries", [])
-            for entry in entries:
-                start = entry.get("startDate", "")
-                end = entry.get("endDate", "")
-                if not start or not end:
-                    continue
-                try:
-                    start_dt = datetime.strptime(start, "%Y-%m-%dT%H:%MZ")
-                    end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%MZ")
-                except (ValueError, TypeError):
-                    continue
-
-                # Split into monthly chunks to stay under ESPN's ~100 event limit
-                for chunk_start, chunk_end in self._split_date_range(start_dt, end_dt):
-                    start_fmt = chunk_start.strftime("%Y%m%d")
-                    end_fmt = chunk_end.strftime("%Y%m%d")
-                    date_range = f"{start_fmt}-{end_fmt}"
-                    url = f"{api_base}/{lkey}/scoreboard?dates={date_range}"
-                    filepath = espn.data_dir / f"Schedule_{lkey}_{date_range}.json"
-                    try:
-                        current_season = not espn._is_complete(lkey, skey)
-                        reader = espn.get(url, filepath, no_cache=current_season and not force_cache)
-                        data = json.load(reader)
-                        for e in data.get("events", []):
-                            self._parse_event(e, lkey, skey, rows)
-                    except Exception as exc:
-                        log.debug("Failed to fetch %s/%s: %s", lkey, date_range, exc)
-
-    @staticmethod
-    def _split_date_range(
-        start: datetime, end: datetime, max_days: int = 30
-    ) -> list[tuple[datetime, datetime]]:
-        """Split a date range into chunks of at most max_days."""
-        chunks = []
-        current = start
-        while current < end:
-            chunk_end = min(current + timedelta(days=max_days), end)
-            chunks.append((current, chunk_end))
-            current = chunk_end + timedelta(days=1)
-        return chunks
-
-    def _parse_event(
-        self, event: dict, lkey: str, skey: str, rows: list[dict[str, Any]]
-    ) -> None:
-        """Parse a single ESPN event into a schedule row."""
-        comps = event.get("competitions", [])
-        if not comps:
-            return
-        competitors = comps[0].get("competitors", [])
-        if len(competitors) < 2:
-            return
-        try:
-            rows.append({
-                "league": lkey,
-                "season": skey,
-                "date": event.get("date"),
-                "home_team": competitors[0].get("team", {}).get("name", ""),
-                "away_team": competitors[1].get("team", {}).get("name", ""),
-                "game_id": int(event["id"]),
-                "league_id": lkey,
-            })
-        except (KeyError, ValueError):
-            pass
-
-    def _add_scores(self, schedule: pd.DataFrame) -> pd.DataFrame:
-        """Parse scores from cached ESPN JSON files into the schedule."""
-        cache_dir = self._get_espn().data_dir
-        scores: dict[int, tuple[int, int]] = {}  # game_id → (home_score, away_score)
-
-        for path in cache_dir.glob("Schedule_*.json"):
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-                for event in data.get("events", []):
-                    for comp in event.get("competitions", []):
-                        competitors = comp.get("competitors", [])
-                        if len(competitors) != 2:
-                            continue
-                        status = comp.get("status", {}).get("type", {}).get("name", "")
-                        if status != "STATUS_FULL_TIME":
-                            continue
-                        game_id = int(event["id"])
-                        home_score = away_score = 0
-                        for c in competitors:
-                            s = int(c.get("score", 0))
-                            if c.get("homeAway") == "home":
-                                home_score = s
-                            else:
-                                away_score = s
-                        scores[game_id] = (home_score, away_score)
-            except Exception:
-                continue
-
-        df = schedule.reset_index() if schedule.index.names[0] is not None else schedule.copy()
-        df["home_score"] = df["game_id"].map(lambda gid: scores.get(int(gid), (None, None))[0] if pd.notna(gid) else None)
-        df["away_score"] = df["game_id"].map(lambda gid: scores.get(int(gid), (None, None))[1] if pd.notna(gid) else None)
-
-        if schedule.index.names[0] is not None:
-            df = df.set_index(schedule.index.names)
         return df
 
     # ── Public API ───────────────────────────────────────────────────────
@@ -423,24 +391,18 @@ class DataAssembler:
         """Fetch recent matches, optionally enriched from multiple sources."""
         sources = sources or SOURCES
 
-        # 1. Base data from ESPN
-        espn = self._get_espn()
-        schedule = self._get_schedule()
-        matches = self._filter_team_schedule(schedule, team, limit)
+        # 1. Base data from Sofascore schedule
+        schedule = self._get_sofascore_schedule()
+        matches = self._filter_team_from_sofascore(schedule, team, limit)
 
         if not matches:
-            log.warning("No matches found for %s in ESPN schedule", team)
+            log.warning("No matches found for %s in Sofascore schedule", team)
             return []
 
-        # Enrich with matchsheet + lineup from game summaries.
-        # We fetch summaries directly instead of using espn.read_matchsheet()
-        # / read_lineup(), because those methods internally re-call
-        # read_schedule() without force_cache, adding 60+ seconds per call.
-        game_ids = [m["game_id"] for m in matches if m.get("game_id")]
-        summaries = self._fetch_summaries(game_ids)
-        matches = self._enrich_from_summaries(matches, summaries, team)
+        # 2. Enrich each match with Sofascore API data (stats, incidents, lineups)
+        self._enrich_from_sofascore(matches, team)
 
-        # 2. Enrichment: Understat (xG) — only for big-5 leagues
+        # 3. Enrichment: Understat (xG) — only for big-5 leagues
         if "understat" in sources:
             us_leagues = [l for l in self._leagues if l in UNDERSTAT_LEAGUES]
             if us_leagues:
@@ -465,23 +427,21 @@ class DataAssembler:
         sources = sources or SOURCES
 
         log.info("Fetching H2H: %s vs %s", team_a, team_b)
-        espn = self._get_espn()
-        schedule = self._get_schedule()
+        schedule = self._get_sofascore_schedule()
 
-        h2h_rows = self._filter_h2h_schedule(schedule, team_a, team_b)
+        h2h_rows = self._filter_h2h_from_sofascore(schedule, team_a, team_b)
         if not h2h_rows:
             log.warning("No H2H matches found for %s vs %s", team_a, team_b)
             return []
 
-        game_ids = [r["game_id"] for r in h2h_rows if r.get("game_id")]
-        summaries = self._fetch_summaries(game_ids)
-
         h2h_matches = []
         for row in h2h_rows:
-            h2h = self._build_h2h_match(row, team_a, team_b)
+            h2h = self._build_h2h_match_sofascore(row, team_a, team_b)
             if h2h:
-                self._enrich_h2h_from_summary(h2h, row, summaries, team_a, team_b)
                 h2h_matches.append(h2h)
+
+        # Enrich H2H matches with Sofascore API data
+        self._enrich_h2h_from_sofascore(h2h_matches, team_a, team_b)
 
         # Enrichment (same as recent matches but for both teams)
         if "understat" in sources:
@@ -497,20 +457,27 @@ class DataAssembler:
 
         return h2h_matches
 
-    # ── ESPN data extraction ─────────────────────────────────────────────
+    # ── Sofascore data extraction ────────────────────────────────────────
 
-    def _filter_team_schedule(
+    @staticmethod
+    def _format_minute(time: int | None, added_time: int | None = None) -> str:
+        """Convert Sofascore integer time to display format like ``53'`` or ``45'+2'``."""
+        if time is None:
+            return ""
+        if added_time:
+            return f"{time}'+{added_time}'"
+        return f"{time}'"
+
+    def _filter_team_from_sofascore(
         self, schedule: pd.DataFrame, team: str, limit: int
     ) -> list[dict[str, Any]]:
-        """Extract past matches for a team from the schedule DataFrame.
+        """Filter the Sofascore schedule for a team's completed matches.
 
-        Scores are parsed from cached ESPN JSON files (see ``_add_scores``).
-        Matches without scores are treated as incomplete and skipped.
+        Returns a list of match dicts with base fields filled in.
         """
         matches: list[dict[str, Any]] = []
         now = pd.Timestamp.now(tz="UTC")
 
-        # Reset index to access all columns
         df = schedule.reset_index() if schedule.index.names[0] is not None else schedule
 
         for _, row in df.iterrows():
@@ -573,7 +540,7 @@ class DataAssembler:
                 "card_events": [],
                 "opponent_card_events": [],
                 "game_id": game_id,
-                "game": str(row.get("game", "")),
+                "extras": {},
             }
             matches.append(match)
 
@@ -581,7 +548,7 @@ class DataAssembler:
         matches.sort(key=lambda m: m["date"], reverse=True)
         return matches[:limit]
 
-    def _filter_h2h_schedule(
+    def _filter_h2h_from_sofascore(
         self, schedule: pd.DataFrame, team_a: str, team_b: str
     ) -> list[dict[str, Any]]:
         """Find completed matches where both teams played each other."""
@@ -611,7 +578,7 @@ class DataAssembler:
                 except Exception:
                     pass
 
-            # Skip matches without scores (incomplete / future)
+            # Skip matches without scores
             home_score = row.get("home_score")
             away_score = row.get("away_score")
             if home_score is None or away_score is None or pd.isna(home_score) or pd.isna(away_score):
@@ -632,14 +599,13 @@ class DataAssembler:
                 "away_score": int(away_score),
                 "league": str(row.get("league", "")),
                 "game_id": row.get("game_id") or row.get("match_id"),
-                "game": str(row.get("game", "")),
                 "team_a_is_home": a_is_home,
             })
 
         rows.sort(key=lambda r: r["date"], reverse=True)
         return rows
 
-    def _build_h2h_match(
+    def _build_h2h_match_sofascore(
         self,
         row: dict[str, Any],
         team_a: str,
@@ -669,402 +635,439 @@ class DataAssembler:
             "result": f"{a_score}:{b_score}",
             "teamA_stats": None,
             "teamB_stats": None,
+            "teamA_extras": {},
+            "teamB_extras": {},
             "first_half_result": None,
             "teamA_goal_events": [],
             "teamB_goal_events": [],
             "teamA_card_events": [],
             "teamB_card_events": [],
             "game_id": row.get("game_id"),
+            "team_a_is_home": a_is_home,
         }
 
-    # ── Enrichment helpers ───────────────────────────────────────────────
+    # ── Sofascore API enrichment helpers ─────────────────────────────────
 
-    # ── Direct summary fetching (bypasses soccerdata's slow methods) ────
+    def _fetch_sofascore_statistics(self, game_id: int) -> dict | None:
+        """Fetch per-match statistics from Sofascore API with caching."""
+        try:
+            ss = self._get_sofascore()
+            filepath = ss.data_dir / f"EventStats_{game_id}.json"
+            url = f"https://api.sofascore.com/api/v1/event/{game_id}/statistics"
+            resp = ss.get(url, filepath)
+            return json.load(resp)
+        except Exception as exc:
+            log.warning("Sofascore statistics failed for event %s: %s", game_id, exc)
+            return None
 
-    def _fetch_summaries(self, game_ids: list) -> dict[int, dict]:
-        """Fetch game summary JSON for each game_id, using soccerdata's cache.
+    def _fetch_sofascore_incidents(self, game_id: int) -> dict | None:
+        """Fetch per-match incidents from Sofascore API with caching."""
+        try:
+            ss = self._get_sofascore()
+            filepath = ss.data_dir / f"EventIncidents_{game_id}.json"
+            url = f"https://api.sofascore.com/api/v1/event/{game_id}/incidents"
+            resp = ss.get(url, filepath)
+            return json.load(resp)
+        except Exception as exc:
+            log.warning("Sofascore incidents failed for event %s: %s", game_id, exc)
+            return None
 
-        Returns {game_id: parsed_json}.
+    def _fetch_sofascore_lineups(self, game_id: int) -> dict | None:
+        """Fetch per-match lineups from Sofascore API with caching."""
+        try:
+            ss = self._get_sofascore()
+            filepath = ss.data_dir / f"EventLineups_{game_id}.json"
+            url = f"https://api.sofascore.com/api/v1/event/{game_id}/lineups"
+            resp = ss.get(url, filepath)
+            return json.load(resp)
+        except Exception as exc:
+            log.warning("Sofascore lineups failed for event %s: %s", game_id, exc)
+            return None
+
+    def _parse_sofascore_stats(
+        self, stats_data: dict, is_home: bool
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Parse Sofascore statistics response into team/opponent stats + extras.
+
+        Returns (team_stats, opp_stats, team_extras, opp_extras).
         """
-        espn = self._get_espn()
-        result: dict[int, dict] = {}
-        for gid in game_ids:
-            try:
-                gid = int(gid)
-                filepath = espn.data_dir / f"Summary_{gid}.json"
-                url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/summary?event={gid}"
-                reader = espn.get(url, filepath)
-                result[gid] = json.load(reader)
-            except Exception as exc:
-                log.warning("Failed to fetch summary for game %s: %s", gid, exc)
-        return result
-
-    # ── Stat extraction helpers ─────────────────────────────────────────
-
-    @staticmethod
-    def _extract_stats(team_data: dict) -> dict[str, Any]:
-        """Extract match stats (shots, xG, fouls, cards, etc.) from boxscore team data."""
-        stats: dict[str, Any] = {
-            "shots": None,
-            "shots_on_target": None,
-            "expected_goals": None,
-            "saves": None,
-            "fouls": None,
-            "yellow_cards": None,
-            "red_cards": None,
-            "possession": None,
+        team_stats: dict[str, Any] = {
+            "shots": None, "shots_on_target": None, "expected_goals": None,
+            "saves": None, "fouls": None, "yellow_cards": None,
+            "red_cards": None, "possession": None,
         }
+        opp_stats: dict[str, Any] = {
+            "shots": None, "shots_on_target": None, "expected_goals": None,
+            "saves": None, "fouls": None, "yellow_cards": None,
+            "red_cards": None, "possession": None,
+        }
+        team_extras: dict[str, Any] = {}
+        opp_extras: dict[str, Any] = {}
+        corners_won = None
+        corners_conceded = None
+
+        # Map Sofascore stat keys to our stat fields
         stat_map = {
-            "totalShots": "shots",
-            "shotsOnTarget": "shots_on_target",
+            "totalShotsOnGoal": "shots",
+            "shotsOnGoal": "shots_on_target",
             "expectedGoals": "expected_goals",
-            "saves": "saves",
-            "foulsCommitted": "fouls",
+            "goalkeeperSaves": "saves",
+            "fouls": "fouls",
             "yellowCards": "yellow_cards",
             "redCards": "red_cards",
-            "possessionPct": "possession",
+            "ballPossession": "possession",
         }
-        # Additional stats stored in extras (not in typed MatchStats)
         extras_map = {
-            "blockedShots": "blockedShots",
+            "totalTackle": "tackles",
+            "wonTacklePercent": "tacklesWon",
+            "interceptionWon": "interceptions",
+            "blockedScoringAttempt": "blockedShots",
             "offsides": "offsides",
-            "penaltyKickGoals": "penKickGoals",
-            "penaltyKickShots": "penKickShots",
-            "totalCrosses": "crosses",
-            "accurateCrosses": "crossesAcc",
-            "totalTackles": "tackles",
-            "effectiveTackles": "tacklesWon",
-            "interceptions": "interceptions",
+            "accurateCross": "crossesAcc",
+            "accuratePasses": "passesAcc",
+            "totalClearance": "clearances",
+            "ballRecovery": "ballRecoveries",
+            "aerialDuelsPercentage": "aerialDuelsPct",
+            "groundDuelsPercentage": "groundDuelsPct",
+            "bigChanceCreated": "bigChancesCreated",
+            "bigChanceScored": "bigChancesScored",
+            "bigChanceMissed": "bigChancesMissed",
+            "accurateThroughBall": "throughBalls",
+            "touchesInOppBox": "touchesInBox",
+            "fouledFinalThird": "fouledFinalThird",
+            "accurateLongBalls": "longBallsAcc",
+            "totalShotsInsideBox": "shotsInsideBox",
+            "totalShotsOutsideBox": "shotsOutsideBox",
+            "hitWoodwork": "hitWoodwork",
+            "errorsLeadToGoal": "errorsLeadToGoal",
+            "goalsPrevented": "goalsPrevented",
+            "duelWonPercent": "duelWonPct",
+            "dispossessed": "dispossessed",
+            "goalKicks": "goalKicks",
+            "throwIns": "throwIns",
+            "finalThirdEntries": "finalThirdEntries",
         }
-        extras: dict[str, Any] = {}
-        for stat in team_data.get("statistics", []):
-            name = stat.get("name", "")
-            if name in stat_map:
-                try:
-                    val = stat.get("displayValue")
-                    if val is not None:
-                        stats[stat_map[name]] = float(val) if "." in str(val) else int(val)
-                except (ValueError, TypeError):
-                    pass
-            elif name in extras_map:
-                try:
-                    val = stat.get("displayValue")
-                    if val is not None:
-                        extras[extras_map[name]] = float(val) if "." in str(val) else int(val)
-                except (ValueError, TypeError):
-                    pass
-        return stats | ({"_extras": extras} if extras else {})
 
-    @staticmethod
-    def _extract_goal_events(data: dict, team_idx: int) -> list[dict[str, str]]:
-        """Extract goal events (scorer + minute) from ESPN key events / scoring plays."""
-        goals: list[dict[str, str]] = []
-        # Try keyEvents first, then scoringPlays
-        events = data.get("keyEvents", []) or []
-        for ev in events:
-            play = ev.get("play", ev)
-            ptype = play.get("type", {}).get("text", "").lower()
-            if "goal" not in ptype:
+        # Use ALL period stats
+        for period_block in stats_data.get("statistics", []):
+            if period_block.get("period") != "ALL":
                 continue
-            # Check team index
-            ev_team = play.get("team", {}).get("id")
-            form_data = data.get("boxscore", {}).get("form", [])
-            if len(form_data) > team_idx:
-                expected_team_id = str(form_data[team_idx].get("team", {}).get("id", ""))
-                if str(ev_team) != expected_team_id:
-                    continue
-            clock = play.get("clock", {}).get("displayValue", "")
-            participants = play.get("participants", [])
-            scorer = participants[0].get("athlete", {}).get("displayName", "") if participants else ""
-            if scorer and clock:
-                goals.append({"player": scorer, "minute": clock})
-        # Fallback: parse scoring plays from header
-        if not goals:
-            scoring = data.get("scoringPlays", [])
-            for sp in scoring:
-                sp_team_idx = sp.get("team", {}).get("order", 1) - 1
-                if sp_team_idx != team_idx:
-                    continue
-                clock = sp.get("clock", {}).get("displayValue", "")
-                text = sp.get("text", "")
-                scorer = text.split("(")[0].strip().split("-")[0].strip() if text else ""
-                if scorer and clock:
-                    goals.append({"player": scorer, "minute": clock})
-        return goals
+            for group in period_block.get("groups", []):
+                for item in group.get("statisticsItems", []):
+                    key = item.get("key", "")
+                    home_val = item.get("homeValue")
+                    away_val = item.get("awayValue")
+                    t_val = home_val if is_home else away_val
+                    o_val = away_val if is_home else home_val
 
-    @staticmethod
-    def _extract_card_events(data: dict, team_idx: int) -> list[dict[str, str]]:
-        """Extract card events from ESPN key events."""
-        cards: list[dict[str, str]] = []
-        events = data.get("keyEvents", []) or []
-        for ev in events:
-            play = ev.get("play", ev)
-            ptype = play.get("type", {}).get("text", "").lower()
-            card_type = None
-            if "red card" in ptype or "red-card" in ptype:
-                card_type = "red"
-            elif "second yellow" in ptype or "second-yellow" in ptype:
-                card_type = "second_yellow"
-            elif "yellow card" in ptype or "yellow-card" in ptype:
-                card_type = "yellow"
-            if not card_type:
-                continue
-            ev_team = play.get("team", {}).get("id")
-            form_data = data.get("boxscore", {}).get("form", [])
-            if len(form_data) > team_idx:
-                expected_team_id = str(form_data[team_idx].get("team", {}).get("id", ""))
-                if str(ev_team) != expected_team_id:
-                    continue
-            clock = play.get("clock", {}).get("displayValue", "")
-            participants = play.get("participants", [])
-            player = participants[0].get("athlete", {}).get("displayName", "") if participants else ""
-            if player and clock:
-                cards.append({"player": player, "minute": clock, "card_type": card_type})
-        return cards
-
-    @staticmethod
-    def _extract_ht_score(data: dict) -> tuple[int | None, int | None]:
-        """Extract half-time score from ESPN summary linescores."""
-        try:
-            header = data.get("header", {})
-            competitions = header.get("competitions", [])
-            if not competitions:
-                return None, None
-            competitors = competitions[0].get("competitors", [])
-            if len(competitors) < 2:
-                return None, None
-            home_ht = away_ht = None
-            for c in competitors:
-                linescores = c.get("linescores", [])
-                if linescores:
-                    first_half = int(linescores[0].get("displayValue", 0))
-                    if c.get("homeAway") == "home":
-                        home_ht = first_half
-                    else:
-                        away_ht = first_half
-            return home_ht, away_ht
-        except Exception:
-            return None, None
-
-    def _enrich_from_summaries(
-        self,
-        matches: list[dict[str, Any]],
-        summaries: dict[int, dict],
-        team: str,
-    ) -> list[dict[str, Any]]:
-        """Enrich matches with corners, stats, goals, cards, lineup from summary JSON."""
-
-        for match in matches:
-            gid = match.get("game_id")
-            if not gid or int(gid) not in summaries:
-                continue
-            data = summaries[int(gid)]
-
-            teams_data = data.get("boxscore", {}).get("teams", [])
-            form_data = data.get("boxscore", {}).get("form", [])
-            team_idx = None
-            opp_idx = None
-
-            for i, td in enumerate(teams_data):
-                td_name = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
-                is_team = _team_matches(team, td_name)
-
-                if is_team:
-                    team_idx = i
-                else:
-                    opp_idx = i
-
-                # -- Corners --
-                for stat in td.get("statistics", []):
-                    if stat.get("name") == "wonCorners":
-                        corners_val = int(stat.get("displayValue", 0))
-                        if is_team:
-                            match["corners_won"] = corners_val
+                    if key == "cornerKicks":
+                        corners_won = self._safe_int(t_val)
+                        corners_conceded = self._safe_int(o_val)
+                    elif key in stat_map:
+                        field = stat_map[key]
+                        if field == "possession":
+                            team_stats[field] = self._safe_float(t_val)
+                            opp_stats[field] = self._safe_float(o_val)
+                        elif field == "expected_goals":
+                            team_stats[field] = self._safe_float(t_val)
+                            opp_stats[field] = self._safe_float(o_val)
                         else:
-                            match["corners_conceded"] = corners_val
+                            team_stats[field] = self._safe_int(t_val)
+                            opp_stats[field] = self._safe_int(o_val)
+                    elif key in extras_map:
+                        field = extras_map[key]
+                        # Percentage/decimal stats use float, others int
+                        if key in ("wonTacklePercent", "aerialDuelsPercentage",
+                                   "groundDuelsPercentage", "duelWonPercent"):
+                            team_extras[field] = self._safe_float(t_val)
+                            opp_extras[field] = self._safe_float(o_val)
+                        else:
+                            team_extras[field] = self._safe_int(t_val)
+                            opp_extras[field] = self._safe_int(o_val)
 
-            if match["corners_won"] is not None and match["corners_conceded"] is not None:
-                match["total_corners"] = match["corners_won"] + match["corners_conceded"]
+        return team_stats, opp_stats, team_extras, opp_extras
 
-            # -- Stats --
-            if team_idx is not None and team_idx < len(teams_data):
-                raw_stats = self._extract_stats(teams_data[team_idx])
-                team_espn_extras = raw_stats.pop("_extras", {})
-                match["stats"] = raw_stats
-            else:
-                team_espn_extras = {}
-            if opp_idx is not None and opp_idx < len(teams_data):
-                raw_opp = self._extract_stats(teams_data[opp_idx])
-                opp_espn_extras = raw_opp.pop("_extras", {})
-                match["opponent_stats"] = raw_opp
-            else:
-                opp_espn_extras = {}
-            # Merge ESPN extras into match extras
-            if team_espn_extras or opp_espn_extras:
+    @staticmethod
+    def _safe_int(val: Any) -> int | None:
+        """Convert a value to int, returning None on failure."""
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _safe_float(val: Any) -> float | None:
+        """Convert a value to float, returning None on failure."""
+        if val is None:
+            return None
+        try:
+            return round(float(val), 2)
+        except (ValueError, TypeError):
+            return None
+
+    def _parse_sofascore_incidents(
+        self, incidents_data: dict, is_home: bool
+    ) -> dict[str, Any]:
+        """Parse Sofascore incidents into goal_events, card_events, subs, HT score.
+
+        Returns dict with keys: goal_events, opponent_goal_events,
+        card_events, opponent_card_events, starters_subbed_off,
+        substitutes, first_half_result.
+        """
+        result: dict[str, Any] = {
+            "goal_events": [],
+            "opponent_goal_events": [],
+            "card_events": [],
+            "opponent_card_events": [],
+            "starters_subbed_off": [],
+            "substitutes": [],
+            "first_half_result": None,
+        }
+
+        for inc in incidents_data.get("incidents", []):
+            inc_type = inc.get("incidentType", "")
+            inc_is_home = inc.get("isHome", False)
+            is_team = (inc_is_home == is_home)
+            minute = self._format_minute(inc.get("time"), inc.get("addedTime"))
+
+            if inc_type == "goal":
+                player_name = inc.get("player", {}).get("name", "")
+                event = {"player": player_name, "minute": minute}
+                if is_team:
+                    result["goal_events"].append(event)
+                else:
+                    result["opponent_goal_events"].append(event)
+
+            elif inc_type == "card":
+                player_name = inc.get("player", {}).get("name", "")
+                inc_class = inc.get("incidentClass", "")
+                card_type_map = {
+                    "yellow": "yellow",
+                    "red": "red",
+                    "yellowRed": "second_yellow",
+                }
+                card_type = card_type_map.get(inc_class, inc_class)
+                event = {"player": player_name, "minute": minute, "card_type": card_type}
+                if is_team:
+                    result["card_events"].append(event)
+                else:
+                    result["opponent_card_events"].append(event)
+
+            elif inc_type == "substitution":
+                if is_team:
+                    player_out = inc.get("playerOut", {}).get("name", "")
+                    player_in = inc.get("playerIn", {}).get("name", "")
+                    if player_out:
+                        result["starters_subbed_off"].append({
+                            "name": player_out,
+                            "subbed_off_time": minute,
+                        })
+                    if player_in:
+                        result["substitutes"].append({
+                            "name": player_in,
+                            "entry_time": minute,
+                        })
+
+            elif inc_type == "period":
+                text = inc.get("text", "")
+                if text == "HT":
+                    home_ht = inc.get("homeScore", 0)
+                    away_ht = inc.get("awayScore", 0)
+                    t_ht = home_ht if is_home else away_ht
+                    o_ht = away_ht if is_home else home_ht
+                    result["first_half_result"] = f"{t_ht}:{o_ht}"
+
+        return result
+
+    def _parse_sofascore_lineups(
+        self, lineup_data: dict, is_home: bool
+    ) -> dict[str, Any]:
+        """Parse Sofascore lineups into formation + starting XI.
+
+        Returns dict with keys: formation, starting_lineup.
+        """
+        side_key = "home" if is_home else "away"
+        side = lineup_data.get(side_key, {})
+
+        formation = side.get("formation")
+        starters = []
+        for p in side.get("players", []):
+            player = p.get("player", {})
+            if not p.get("substitute", False):
+                starters.append(player.get("name", ""))
+
+        return {
+            "formation": str(formation) if formation else None,
+            "starting_lineup": starters,
+        }
+
+    def _enrich_from_sofascore(
+        self, matches: list[dict[str, Any]], team: str
+    ) -> None:
+        """Enrich matches with Sofascore statistics, incidents, and lineups."""
+        for match in matches:
+            game_id = match.get("game_id")
+            if not game_id:
+                continue
+            try:
+                game_id = int(game_id)
+            except (ValueError, TypeError):
+                continue
+
+            is_home = match.get("venue") == "H"
+
+            # -- Statistics (corners, stats, extras) --
+            stats_data = self._fetch_sofascore_statistics(game_id)
+            if stats_data:
+                team_stats, opp_stats, team_extras, opp_extras = self._parse_sofascore_stats(
+                    stats_data, is_home
+                )
+                match["stats"] = team_stats
+                match["opponent_stats"] = opp_stats
+
+                # Extract corners from parsed stats helper
+                for period_block in stats_data.get("statistics", []):
+                    if period_block.get("period") != "ALL":
+                        continue
+                    for group in period_block.get("groups", []):
+                        for item in group.get("statisticsItems", []):
+                            if item.get("key") == "cornerKicks":
+                                home_val = item.get("homeValue")
+                                away_val = item.get("awayValue")
+                                match["corners_won"] = self._safe_int(
+                                    home_val if is_home else away_val
+                                )
+                                match["corners_conceded"] = self._safe_int(
+                                    away_val if is_home else home_val
+                                )
+                if match["corners_won"] is not None and match["corners_conceded"] is not None:
+                    match["total_corners"] = match["corners_won"] + match["corners_conceded"]
+
+                # Merge extras
                 extras = match.setdefault("extras", {}) or {}
                 match["extras"] = extras
-                extras.update(team_espn_extras)
-                # Prefix opponent extras with "opp"
-                for k, v in opp_espn_extras.items():
+                extras.update(team_extras)
+                for k, v in opp_extras.items():
                     extras[f"opp{k[0].upper()}{k[1:]}"] = v
 
-            # -- HT score --
-            home_ht, away_ht = self._extract_ht_score(data)
-            if home_ht is not None and away_ht is not None:
-                is_home = match.get("venue") == "H"
-                t_ht = home_ht if is_home else away_ht
-                o_ht = away_ht if is_home else home_ht
-                match["first_half_result"] = f"{t_ht}:{o_ht}"
+            # -- Incidents (goals, cards, subs, HT score) --
+            incidents_data = self._fetch_sofascore_incidents(game_id)
+            if incidents_data:
+                parsed = self._parse_sofascore_incidents(incidents_data, is_home)
+                match["goal_events"] = parsed["goal_events"]
+                match["opponent_goal_events"] = parsed["opponent_goal_events"]
+                match["card_events"] = parsed["card_events"]
+                match["opponent_card_events"] = parsed["opponent_card_events"]
+                if parsed["first_half_result"]:
+                    match["first_half_result"] = parsed["first_half_result"]
+                # Merge sub data from incidents
+                if parsed["starters_subbed_off"]:
+                    match["starters_subbed_off"] = parsed["starters_subbed_off"]
+                if parsed["substitutes"]:
+                    match["substitutes"] = parsed["substitutes"]
 
-            # -- Goal events --
-            if team_idx is not None:
-                match["goal_events"] = self._extract_goal_events(data, team_idx)
-            if opp_idx is not None:
-                match["opponent_goal_events"] = self._extract_goal_events(data, opp_idx)
+            # -- Lineups (formation, starting XI) --
+            lineup_data = self._fetch_sofascore_lineups(game_id)
+            if lineup_data:
+                parsed_lineup = self._parse_sofascore_lineups(lineup_data, is_home)
+                if parsed_lineup["formation"]:
+                    match["formation"] = parsed_lineup["formation"]
+                if parsed_lineup["starting_lineup"]:
+                    match["starting_lineup"] = parsed_lineup["starting_lineup"]
 
-            # -- Card events --
-            if team_idx is not None:
-                match["card_events"] = self._extract_card_events(data, team_idx)
-            if opp_idx is not None:
-                match["opponent_card_events"] = self._extract_card_events(data, opp_idx)
-
-            # -- Lineup from rosters --
-            rosters = data.get("rosters", [])
-            for i, roster in enumerate(rosters):
-                roster_team = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
-                if not _team_matches(team, roster_team):
-                    continue
-
-                formation = roster.get("formation")
-                if formation:
-                    match["formation"] = str(formation)
-
-                starters = []
-                subs = []
-                subbed_off = []
-                for entry in roster.get("roster", []):
-                    player_name = entry.get("athlete", {}).get("displayName", "")
-                    is_starter = entry.get("starter", False)
-
-                    if is_starter:
-                        starters.append(player_name)
-                        if entry.get("subbedOut"):
-                            plays = entry.get("plays", [])
-                            clock = plays[0].get("clock", {}).get("displayValue", "") if plays else ""
-                            subbed_off.append({"name": player_name, "subbed_off_time": clock})
-                    elif entry.get("subbedIn"):
-                        plays = entry.get("plays", [])
-                        entry_time = plays[0].get("clock", {}).get("displayValue") if plays else None
-                        subs.append({"name": player_name, "entry_time": entry_time})
-
-                if starters:
-                    match["starting_lineup"] = starters
-                if subbed_off:
-                    match["starters_subbed_off"] = subbed_off
-                if subs:
-                    match["substitutes"] = subs
-                break
-
-        return matches
-
-    def _enrich_h2h_from_summary(
+    def _enrich_h2h_from_sofascore(
         self,
-        h2h: dict[str, Any],
-        row: dict[str, Any],
-        summaries: dict[int, dict],
+        h2h_matches: list[dict[str, Any]],
         team_a: str,
         team_b: str,
     ) -> None:
-        """Enrich an H2H match dict from a raw summary JSON."""
-        gid = row.get("game_id")
-        if not gid or int(gid) not in summaries:
-            return
-        data = summaries[int(gid)]
-        a_is_home = row["team_a_is_home"]
+        """Enrich H2H matches with Sofascore API data for both teams."""
+        for h2h in h2h_matches:
+            game_id = h2h.get("game_id")
+            if not game_id:
+                continue
+            try:
+                game_id = int(game_id)
+            except (ValueError, TypeError):
+                continue
 
-        teams_data = data.get("boxscore", {}).get("teams", [])
-        form_data = data.get("boxscore", {}).get("form", [])
-        rosters = data.get("rosters", [])
+            # Determine which team is home based on venue field
+            a_is_home = h2h.get("venue", "").startswith(team_a)
 
-        a_idx = None
-        b_idx = None
+            # -- Statistics --
+            stats_data = self._fetch_sofascore_statistics(game_id)
+            if stats_data:
+                # Team A stats
+                a_stats, b_stats, a_extras, b_extras = self._parse_sofascore_stats(
+                    stats_data, a_is_home
+                )
+                h2h["teamA_stats"] = a_stats
+                h2h["teamB_stats"] = b_stats
 
-        for i, td in enumerate(teams_data):
-            td_name = form_data[i].get("team", {}).get("displayName", "") if i < len(form_data) else ""
-            is_home = (i == 0)
-            is_a = (is_home and a_is_home) or (not is_home and not a_is_home)
-            prefix = "teamA" if is_a else "teamB"
+                # Corners
+                for period_block in stats_data.get("statistics", []):
+                    if period_block.get("period") != "ALL":
+                        continue
+                    for group in period_block.get("groups", []):
+                        for item in group.get("statisticsItems", []):
+                            if item.get("key") == "cornerKicks":
+                                home_val = item.get("homeValue")
+                                away_val = item.get("awayValue")
+                                h2h["teamA_corners"] = self._safe_int(
+                                    home_val if a_is_home else away_val
+                                )
+                                h2h["teamB_corners"] = self._safe_int(
+                                    away_val if a_is_home else home_val
+                                )
+                if h2h["teamA_corners"] is not None and h2h["teamB_corners"] is not None:
+                    h2h["total_corners"] = h2h["teamA_corners"] + h2h["teamB_corners"]
 
-            if is_a:
-                a_idx = i
-            else:
-                b_idx = i
+                # Extras
+                if a_extras:
+                    h2h.setdefault("teamA_extras", {}).update(a_extras)
+                if b_extras:
+                    h2h.setdefault("teamB_extras", {}).update(b_extras)
 
-            # Corners
-            for stat in td.get("statistics", []):
-                if stat.get("name") == "wonCorners":
-                    h2h[f"{prefix}_corners"] = int(stat.get("displayValue", 0))
+            # -- Incidents --
+            incidents_data = self._fetch_sofascore_incidents(game_id)
+            if incidents_data:
+                # Parse for team A perspective
+                parsed_a = self._parse_sofascore_incidents(incidents_data, a_is_home)
+                h2h["teamA_goal_events"] = parsed_a["goal_events"]
+                h2h["teamB_goal_events"] = parsed_a["opponent_goal_events"]
+                h2h["teamA_card_events"] = parsed_a["card_events"]
+                h2h["teamB_card_events"] = parsed_a["opponent_card_events"]
+                if parsed_a["first_half_result"]:
+                    h2h["first_half_result"] = parsed_a["first_half_result"]
 
-            # Stats
-            raw_stats = self._extract_stats(td)
-            espn_extras = raw_stats.pop("_extras", {})
-            h2h[f"{prefix}_stats"] = raw_stats
-            if espn_extras:
-                ext = h2h.setdefault(f"{prefix}_extras", {}) or {}
-                h2h[f"{prefix}_extras"] = ext
-                ext.update(espn_extras)
+                # Subs for team A
+                if parsed_a["starters_subbed_off"]:
+                    h2h["teamA_starters_subbed_off"] = parsed_a["starters_subbed_off"]
+                if parsed_a["substitutes"]:
+                    h2h["teamA_substitutes"] = parsed_a["substitutes"]
 
-            # Formation + lineup from roster
-            if i < len(rosters):
-                formation = rosters[i].get("formation")
-                if formation:
-                    h2h[f"{prefix}_formation"] = str(formation)
+                # Parse for team B perspective (flip is_home)
+                parsed_b = self._parse_sofascore_incidents(incidents_data, not a_is_home)
+                if parsed_b["starters_subbed_off"]:
+                    h2h["teamB_starters_subbed_off"] = parsed_b["starters_subbed_off"]
+                if parsed_b["substitutes"]:
+                    h2h["teamB_substitutes"] = parsed_b["substitutes"]
 
-                starters = []
-                subs = []
-                subbed_off = []
-                for entry in rosters[i].get("roster", []):
-                    player_name = entry.get("athlete", {}).get("displayName", "")
-                    is_starter = entry.get("starter", False)
-                    if is_starter:
-                        starters.append(player_name)
-                        if entry.get("subbedOut"):
-                            plays = entry.get("plays", [])
-                            clock = plays[0].get("clock", {}).get("displayValue", "") if plays else ""
-                            subbed_off.append({"name": player_name, "subbed_off_time": clock})
-                    elif entry.get("subbedIn"):
-                        plays = entry.get("plays", [])
-                        entry_time = plays[0].get("clock", {}).get("displayValue") if plays else None
-                        subs.append({"name": player_name, "entry_time": entry_time})
-
-                if starters:
-                    h2h[f"{prefix}_lineup"] = starters
-                if subbed_off:
-                    h2h[f"{prefix}_starters_subbed_off"] = subbed_off
-                if subs:
-                    h2h[f"{prefix}_substitutes"] = subs
-
-        if h2h["teamA_corners"] is not None and h2h["teamB_corners"] is not None:
-            h2h["total_corners"] = h2h["teamA_corners"] + h2h["teamB_corners"]
-
-        # HT score
-        home_ht, away_ht = self._extract_ht_score(data)
-        if home_ht is not None and away_ht is not None:
-            a_ht = home_ht if a_is_home else away_ht
-            b_ht = away_ht if a_is_home else home_ht
-            h2h["first_half_result"] = f"{a_ht}:{b_ht}"
-
-        # Goal events
-        if a_idx is not None:
-            h2h["teamA_goal_events"] = self._extract_goal_events(data, a_idx)
-        if b_idx is not None:
-            h2h["teamB_goal_events"] = self._extract_goal_events(data, b_idx)
-
-        # Card events
-        if a_idx is not None:
-            h2h["teamA_card_events"] = self._extract_card_events(data, a_idx)
-        if b_idx is not None:
-            h2h["teamB_card_events"] = self._extract_card_events(data, b_idx)
+            # -- Lineups --
+            lineup_data = self._fetch_sofascore_lineups(game_id)
+            if lineup_data:
+                parsed_a_lineup = self._parse_sofascore_lineups(lineup_data, a_is_home)
+                parsed_b_lineup = self._parse_sofascore_lineups(lineup_data, not a_is_home)
+                if parsed_a_lineup["formation"]:
+                    h2h["teamA_formation"] = parsed_a_lineup["formation"]
+                if parsed_a_lineup["starting_lineup"]:
+                    h2h["teamA_lineup"] = parsed_a_lineup["starting_lineup"]
+                if parsed_b_lineup["formation"]:
+                    h2h["teamB_formation"] = parsed_b_lineup["formation"]
+                if parsed_b_lineup["starting_lineup"]:
+                    h2h["teamB_lineup"] = parsed_b_lineup["starting_lineup"]
 
     # ── Understat enrichment ─────────────────────────────────────────────
 
@@ -1369,7 +1372,7 @@ class DataAssembler:
 
         # Try to find match referee: look for upcoming/recent match between teams
         match_ref = None
-        schedule = self._get_schedule()
+        schedule = self._get_sofascore_schedule()
         if schedule is not None and not schedule.empty:
             sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
             for _, row in sched.iterrows():
@@ -1413,7 +1416,7 @@ class DataAssembler:
 
         # Resolve league if team name was passed
         target_league = None
-        schedule = self._get_schedule()
+        schedule = self._get_sofascore_schedule()
         if schedule is not None and not schedule.empty:
             sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
             # Check if it's a direct league name
@@ -1603,7 +1606,7 @@ class DataAssembler:
         target = [l for l in us_leagues if self._fuzzy_team_match(league, l)]
         if not target:
             # Try resolving as a team name via schedule
-            schedule = self._get_schedule()
+            schedule = self._get_sofascore_schedule()
             if schedule is not None and not schedule.empty:
                 sched = schedule.reset_index() if schedule.index.names[0] is not None else schedule
                 team_rows = sched[
@@ -1667,13 +1670,26 @@ class DataAssembler:
         }
 
 
-    def get_sofascore_lineups(self, team_a: str, team_b: str, match_date: str) -> dict[str, Any] | None:
-        """Fetch confirmed lineup data from Sofascore for a specific match.
+    # ── Sofascore shared helpers ────────────────────────────────────────────
 
-        Searches across all configured Sofascore-compatible leagues for the
-        match, then fetches lineups from the event API. Returns None if
-        lineups are not yet available.
-        """
+    # Alias table for matching common short names to Sofascore team names
+    _SOFASCORE_ALIASES: dict[str, str] = {
+        "wolves": "wolverhampton", "spurs": "tottenham",
+        "villa": "aston villa", "forest": "nottingham forest",
+        "palace": "crystal palace", "saints": "southampton",
+        "hammers": "west ham",
+    }
+
+    @staticmethod
+    def _sofascore_teams_match(token: str, candidate: str) -> bool:
+        t, c = token.lower(), candidate.lower()
+        if t in c or c in t:
+            return True
+        expanded = DataAssembler._SOFASCORE_ALIASES.get(t)
+        return bool(expanded and (expanded in c or c in expanded))
+
+    def _find_sofascore_event_id(self, team_a: str, team_b: str, match_date: str) -> int | None:
+        """Find the Sofascore event ID for a match. Returns None if not found."""
         import json as _json
 
         try:
@@ -1682,22 +1698,6 @@ class DataAssembler:
             log.warning("Sofascore init failed: %s", exc)
             return None
 
-        # Alias table for matching common short names to Sofascore team names
-        ALIASES: dict[str, str] = {
-            "wolves": "wolverhampton", "spurs": "tottenham",
-            "villa": "aston villa", "forest": "nottingham forest",
-            "palace": "crystal palace", "saints": "southampton",
-            "hammers": "west ham",
-        }
-
-        def teams_match(token: str, candidate: str) -> bool:
-            t, c = token.lower(), candidate.lower()
-            if t in c or c in t:
-                return True
-            expanded = ALIASES.get(t)
-            return bool(expanded and (expanded in c or c in expanded))
-
-        # Search for events on the given date
         url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{match_date}"
         try:
             resp = ss.get(url)
@@ -1706,25 +1706,36 @@ class DataAssembler:
             log.warning("Sofascore events API failed: %s", exc)
             return None
 
-        game_id = None
         for event in data.get("events", []):
             home = event.get("homeTeam", {}).get("name", "")
             away = event.get("awayTeam", {}).get("name", "")
             a_tokens = team_a.lower().replace("-", " ").split()
             b_tokens = team_b.lower().replace("-", " ").split()
-            a_home = any(teams_match(t, home) for t in a_tokens)
-            a_away = any(teams_match(t, away) for t in a_tokens)
-            b_home = any(teams_match(t, home) for t in b_tokens)
-            b_away = any(teams_match(t, away) for t in b_tokens)
+            a_home = any(self._sofascore_teams_match(t, home) for t in a_tokens)
+            a_away = any(self._sofascore_teams_match(t, away) for t in a_tokens)
+            b_home = any(self._sofascore_teams_match(t, home) for t in b_tokens)
+            b_away = any(self._sofascore_teams_match(t, away) for t in b_tokens)
             if (a_home and b_away) or (a_away and b_home):
-                game_id = event.get("id")
-                break
+                return event.get("id")
 
+        log.info("No matching Sofascore event for %s vs %s on %s", team_a, team_b, match_date)
+        return None
+
+    # ── Sofascore lineups ─────────────────────────────────────────────────
+
+    def get_sofascore_lineups(self, team_a: str, team_b: str, match_date: str) -> dict[str, Any] | None:
+        """Fetch confirmed lineup data from Sofascore for a specific match."""
+        import json as _json
+
+        game_id = self._find_sofascore_event_id(team_a, team_b, match_date)
         if game_id is None:
-            log.info("No matching Sofascore event for %s vs %s on %s", team_a, team_b, match_date)
             return None
 
-        # Fetch lineups
+        try:
+            ss = self._get_sofascore()
+        except Exception:
+            return None
+
         lineup_url = f"https://api.sofascore.com/api/v1/event/{game_id}/lineups"
         try:
             resp = ss.get(lineup_url)
@@ -1756,6 +1767,60 @@ class DataAssembler:
             "home": extract_side(lineup_data["home"]),
             "away": extract_side(lineup_data["away"]),
         }
+
+    # ── Sofascore match statistics ────────────────────────────────────────
+
+    def get_sofascore_match_stats(self, team_a: str, team_b: str, match_date: str) -> dict[str, Any] | None:
+        """Fetch post-game match statistics from Sofascore for a specific match.
+
+        Returns per-period (ALL, 1ST, 2ND) statistics for both teams including
+        corners, shots, passes, duels, defending, etc. Returns None if the
+        match is not found or stats are not yet available.
+        """
+        import json as _json
+
+        game_id = self._find_sofascore_event_id(team_a, team_b, match_date)
+        if game_id is None:
+            return None
+
+        try:
+            ss = self._get_sofascore()
+        except Exception:
+            return None
+
+        stats_url = f"https://api.sofascore.com/api/v1/event/{game_id}/statistics"
+        try:
+            resp = ss.get(stats_url)
+            stats_data = _json.load(resp)
+        except Exception as exc:
+            log.warning("Sofascore statistics API failed for event %s: %s", game_id, exc)
+            return None
+
+        statistics = stats_data.get("statistics")
+        if not statistics:
+            log.info("Statistics not available for event %s", game_id)
+            return None
+
+        # Parse the statistics into a structured dict keyed by period
+        # Sofascore returns: [{ "period": "ALL", "groups": [{ "groupName": "...", "statisticsItems": [...] }] }, ...]
+        result: dict[str, dict[str, Any]] = {}
+        for period_block in statistics:
+            period = period_block.get("period", "ALL")
+            stats: dict[str, Any] = {}
+            for group in period_block.get("groups", []):
+                group_name = group.get("groupName", "")
+                for item in group.get("statisticsItems", []):
+                    key = item.get("key", "")
+                    if not key:
+                        continue
+                    stats[key] = {
+                        "home": item.get("homeValue"),
+                        "away": item.get("awayValue"),
+                        "group": group_name,
+                    }
+            result[period] = stats
+
+        return result
 
 
 # ── Request dispatcher ───────────────────────────────────────────────────────
@@ -1799,6 +1864,13 @@ def handle_request(assembler: DataAssembler, req: dict[str, Any]) -> Any:
 
     if method == "get_sofascore_lineups":
         return assembler.get_sofascore_lineups(
+            team_a=params["team_a"],
+            team_b=params["team_b"],
+            match_date=params["match_date"],
+        )
+
+    if method == "get_sofascore_match_stats":
+        return assembler.get_sofascore_match_stats(
             team_a=params["team_a"],
             team_b=params["team_b"],
             match_date=params["match_date"],

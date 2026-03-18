@@ -20,9 +20,9 @@ export function buildReportFilename(teamA: string, teamB: string, date: string, 
   return path.join(buildMatchDir(teamA, teamB, date), `${market}.md`);
 }
 
-/** Analysis path: {matchDir}/{market}-analysis.md */
-export function buildAnalysisFilename(teamA: string, teamB: string, date: string, market: string): string {
-  return path.join(buildMatchDir(teamA, teamB, date), `${market}-analysis.md`);
+/** Prediction path: {matchDir}/{market}-prediction.md */
+export function buildPredictionFilename(teamA: string, teamB: string, date: string, market: string): string {
+  return path.join(buildMatchDir(teamA, teamB, date), `${market}-prediction.md`);
 }
 
 /** News path: {matchDir}/news.md */
@@ -39,3 +39,4 @@ export function buildResultsFilename(matchDir: string, market: string): string {
 export function buildReviewFilename(matchDir: string, market: string): string {
   return path.join(matchDir, `${market}-review.md`);
 }
+

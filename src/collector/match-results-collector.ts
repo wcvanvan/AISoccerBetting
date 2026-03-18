@@ -1,19 +1,20 @@
 /**
- * Post-game results collector — gathers actual match results from two sources:
+ * Post-game results collector — gathers actual match results from three sources:
  *
- * 1. Soccerdata (structured): corners, goals, cards, lineups, scores, stats,
- *    extras (xG, npxG, PPDA, deep, tackles, crosses, etc.) — same data as
- *    the pre-game collection pipeline, from ESPN + Understat via Python bridge.
- * 2. Claude Code CLI (narrative): supplementary corner-specific context via
- *    web search — minute-by-minute corner data, set-piece patterns, etc.
+ * 1. ESPN + Understat (via soccerdata): corners, goals, cards, lineups, scores,
+ *    stats, extras (xG, npxG, PPDA, deep, tackles, crosses, etc.)
+ * 2. Sofascore (via soccerdata): per-half stat breakdowns (corners, shots, duels,
+ *    passes, defending) — fills gaps ESPN doesn't cover.
+ * 3. Claude Code CLI (result collection): corner-specific details from web search
+ *    — minute-by-minute corner data, delivery patterns, set-piece analysis.
  *
- * The two sources are merged into a single {market}-results.md file.
+ * The three sources are merged into a single {market}-results.md file.
  */
 
 import { runClaudeCli } from '../agent/claude-cli';
 import { stripCodeFences } from '../agent/strip-code-fences';
 import { config } from '../config';
-import { SoccerdataProvider } from '../provider';
+import { SoccerdataProvider, SofascoreMatchStats } from '../provider';
 import { MatchDetails, MatchStats, GoalEvent, CardEvent } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -46,45 +47,44 @@ export async function collectMatchResults(input: CollectResultsInput): Promise<s
 
   console.log(`Collecting ${market} results for ${homeTeam} vs ${awayTeam} (${date})...`);
 
-  // ── 1. Soccerdata structured data ──
-  let structuredSection = '';
+  // ── 1. Soccerdata (ESPN + Understat + Sofascore) ──
+  let dataSection = '';
   const provider = new SoccerdataProvider();
   try {
-    structuredSection = await collectStructuredData(provider, homeTeam, awayTeam, date, market);
+    dataSection = await collectSoccerdata(provider, homeTeam, awayTeam, date);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Soccerdata collection failed: ${msg}`);
-    structuredSection = `## Structured Data\n\n*Soccerdata collection failed: ${msg}*\n`;
+    dataSection = `## Structured Data\n\n*Soccerdata collection failed: ${msg}*\n`;
   } finally {
     provider.dispose();
   }
 
-  // ── 2. CLI narrative supplement (corner-specific details from web) ──
-  let narrativeSection = '';
+  // ── 2. CLI result collection (corner-specific details from web) ──
+  let detailSection = '';
   try {
-    narrativeSection = await collectNarrative(homeTeam, awayTeam, date, narrativePrompt);
+    detailSection = await collectResultsViaCliAgent(homeTeam, awayTeam, date, narrativePrompt);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Narrative collection skipped: ${msg}`);
-    narrativeSection = `## Match Narrative\n\n*Narrative collection unavailable: ${msg}*\n`;
+    console.error(`CLI result collection skipped: ${msg}`);
+    detailSection = `## Corner Detail Collection\n\n*Collection unavailable: ${msg}*\n`;
   }
 
   // ── 3. Merge into markdown ──
   const header = `# ${homeTeam} vs ${awayTeam} — Post-Match ${capitalize(market)} Results\n\n**Date**: ${date} | **League**: ${meta.leagueLabel}\n`;
 
-  return [header, structuredSection, narrativeSection].join('\n---\n\n');
+  return [header, dataSection, detailSection].join('\n---\n\n');
 }
 
-// ── Soccerdata collection ──────────────────────────────────────────────────
+// ── Soccerdata collection (ESPN + Understat + Sofascore) ──────────────────
 
-async function collectStructuredData(
+async function collectSoccerdata(
   provider: SoccerdataProvider,
   homeTeam: string,
   awayTeam: string,
   matchDate: string,
-  market: string,
 ): Promise<string> {
-  console.log('  Fetching structured data from soccerdata...');
+  console.log('  Fetching data from soccerdata (ESPN + Understat + Sofascore)...');
 
   // Resolve team IDs
   const [homeId, awayId] = await Promise.all([
@@ -95,21 +95,34 @@ async function collectStructuredData(
   if (!homeId) throw new Error(`Could not resolve team ID for "${homeTeam}"`);
   if (!awayId) throw new Error(`Could not resolve team ID for "${awayTeam}"`);
 
-  // Fetch recent matches for both teams — only need a few to find the specific game
-  const [homeMatches, awayMatches] = await Promise.all([
+  // Fetch ESPN/Understat match data + Sofascore stats in parallel
+  const [homeMatches, awayMatches, sofascoreStats] = await Promise.all([
     provider.getRecentMatches(homeId, 5),
     provider.getRecentMatches(awayId, 5),
+    provider.getSofascoreMatchStats(homeTeam, awayTeam, matchDate).catch((err) => {
+      console.error(`  Sofascore stats skipped: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }),
   ]);
 
   // Find the specific match from both perspectives
   const homeMatch = findMatchByDate(homeMatches, awayTeam, matchDate);
   const awayMatch = findMatchByDate(awayMatches, homeTeam, matchDate);
 
-  if (!homeMatch && !awayMatch) {
-    return `## Structured Data\n\n*Match not found in soccerdata for ${matchDate}. The match may not have been played yet or data may not be available.*\n`;
+  // Combine ESPN/Understat + Sofascore — either or both may have data
+  const parts: string[] = [];
+
+  if (homeMatch || awayMatch) {
+    parts.push(formatStructuredData(homeMatch, awayMatch, homeTeam, awayTeam));
+  } else {
+    parts.push(`## ESPN/Understat Data\n\n*Match not found in ESPN for ${matchDate}. Data may not be available yet.*\n`);
   }
 
-  return formatStructuredData(homeMatch, awayMatch, homeTeam, awayTeam);
+  if (sofascoreStats) {
+    parts.push(formatSofascoreStats(sofascoreStats, homeTeam, awayTeam));
+  }
+
+  return parts.join('\n');
 }
 
 function findMatchByDate(
@@ -304,15 +317,110 @@ function formatLineupSection(parts: string[], teamName: string, match: MatchDeta
   parts.push('');
 }
 
-// ── CLI narrative collection ──────────────────────────────────────────────
+// ── Sofascore stats formatting ─────────────────────────────────────────────
 
-async function collectNarrative(
+function formatSofascoreStats(
+  stats: SofascoreMatchStats,
+  homeTeam: string,
+  awayTeam: string,
+): string {
+  const parts: string[] = [];
+  parts.push(`## Sofascore Stats (per-half breakdown)\n`);
+
+  // Corner stats per half — most important for corner analysis
+  const allCorners = stats['ALL']?.['cornerKicks'];
+  const h1Corners = stats['1ST']?.['cornerKicks'];
+  const h2Corners = stats['2ND']?.['cornerKicks'];
+
+  if (allCorners || h1Corners || h2Corners) {
+    parts.push(`### Corners per Half\n`);
+    parts.push(`| Period | ${homeTeam} | ${awayTeam} | Total |`);
+    parts.push(`|--------|------------|------------|-------|`);
+    if (h1Corners) {
+      const h = num(h1Corners.home);
+      const a = num(h1Corners.away);
+      parts.push(`| 1st Half | ${h} | ${a} | ${h + a} |`);
+    }
+    if (h2Corners) {
+      const h = num(h2Corners.home);
+      const a = num(h2Corners.away);
+      parts.push(`| 2nd Half | ${h} | ${a} | ${h + a} |`);
+    }
+    if (allCorners) {
+      const h = num(allCorners.home);
+      const a = num(allCorners.away);
+      parts.push(`| **Full Match** | **${h}** | **${a}** | **${h + a}** |`);
+    }
+    parts.push('');
+  }
+
+  // Per-half stats table for key metrics
+  const periods: Array<{ key: string; label: string }> = [
+    { key: '1ST', label: '1st Half' },
+    { key: '2ND', label: '2nd Half' },
+  ];
+
+  // Stats we want to show per-half (key → display label)
+  const statKeys: Array<[string, string]> = [
+    ['ballPossession', 'Possession'],
+    ['expectedGoals', 'xG'],
+    ['totalShotsOnGoal', 'Total Shots'],
+    ['shotsOnGoal', 'Shots on Target'],
+    ['bigChanceCreated', 'Big Chances Created'],
+    ['bigChanceMissed', 'Big Chances Missed'],
+    ['accuratePasses', 'Accurate Passes'],
+    ['accurateCross', 'Accurate Crosses'],
+    ['totalTackle', 'Tackles'],
+    ['interceptionWon', 'Interceptions'],
+    ['totalClearance', 'Clearances'],
+    ['ballRecovery', 'Ball Recoveries'],
+    ['aerialDuelsPercentage', 'Aerial Duels Won %'],
+    ['fouls', 'Fouls'],
+    ['goalkeeperSaves', 'GK Saves'],
+  ];
+
+  for (const period of periods) {
+    const periodStats = stats[period.key];
+    if (!periodStats) continue;
+
+    const rows: string[] = [];
+    for (const [key, label] of statKeys) {
+      const item = periodStats[key];
+      if (!item) continue;
+      rows.push(`| ${label} | ${fmtSofascoreVal(item.home)} | ${fmtSofascoreVal(item.away)} |`);
+    }
+
+    if (rows.length > 0) {
+      parts.push(`### ${period.label} Stats\n`);
+      parts.push(`| Stat | ${homeTeam} | ${awayTeam} |`);
+      parts.push(`|------|------------|------------|`);
+      parts.push(...rows);
+      parts.push('');
+    }
+  }
+
+  return parts.join('\n');
+}
+
+function num(v: string | number | null | undefined): number {
+  if (v == null) return 0;
+  return typeof v === 'number' ? v : parseInt(String(v), 10) || 0;
+}
+
+function fmtSofascoreVal(v: string | number | null | undefined): string {
+  if (v == null) return '-';
+  return String(v);
+}
+
+// ── CLI result collection (web search for corner-specific detail) ─────────
+
+async function collectResultsViaCliAgent(
   homeTeam: string,
   awayTeam: string,
   matchDate: string,
   systemPrompt: string,
 ): Promise<string> {
-  console.log('  Fetching narrative from web sources via Claude CLI...');
+  console.log('  Collecting corner details from web sources via Claude CLI...');
 
   const userMessage = `Collect post-match corner data for: ${homeTeam} vs ${awayTeam}, played on ${matchDate}. Use web search to find comprehensive match data. Return only the structured output as specified.`;
   const cliPrompt = [systemPrompt, '', '---', '', userMessage].join('\n');
@@ -320,14 +428,14 @@ async function collectNarrative(
   const result = await runClaudeCli(cliPrompt, {
     onLog: (line) => console.error(line),
     model: config.news.model,
-    maxOutputTokens: 16_384,
+    maxOutputTokens: 32_768,
     effort: 'medium',
   });
 
   const text = stripCodeFences(result);
-  if (!text) throw new Error('Narrative agent returned no text content.');
+  if (!text) throw new Error('Result collection agent returned no text content.');
 
-  return `## Match Narrative\n\n${text}\n`;
+  return `## Corner Detail Collection\n\n${text}\n`;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

@@ -6,12 +6,16 @@
 
 import { stripCodeFences } from './strip-code-fences';
 import { runClaudeCli } from './claude-cli';
-import { CORNER_ANALYSIS_SYSTEM_PROMPT } from './prompts/corner-analysis-system-prompt';
+import { CORNER_PREDICTION_SYSTEM_PROMPT } from './prompts/corner-prediction-system-prompt';
 
 const PROGRESS_INTERVAL_SEC = 60;
 
 export interface AnalyzeReportOptions {
   onLog?: (line: string) => void;
+  /** Override the model (passed through to runClaudeCli) */
+  model?: string;
+  /** Override the effort level (passed through to runClaudeCli) */
+  effort?: 'low' | 'medium' | 'high' | 'max';
 }
 
 /**
@@ -23,7 +27,7 @@ export async function analyzeReport(
   systemPrompt?: string,
   opts?: AnalyzeReportOptions,
 ): Promise<string> {
-  const prompt = systemPrompt ?? CORNER_ANALYSIS_SYSTEM_PROMPT;
+  const prompt = systemPrompt ?? CORNER_PREDICTION_SYSTEM_PROMPT;
   return analyzeViaCli(report, prompt, opts);
 }
 
@@ -46,6 +50,8 @@ async function analyzeViaCli(
   try {
     const result = await runClaudeCli(cliPrompt, {
       onLog: opts?.onLog,
+      model: opts?.model,
+      effort: opts?.effort,
     });
     return stripCodeFences(result);
   } finally {

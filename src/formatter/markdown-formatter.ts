@@ -196,13 +196,25 @@ export class MarkdownFormatter {
         line1 += this.formatCardStatsInline(m.stats, m.opponent_stats, m.card_events, m.opponent_card_events, m.extras);
       }
 
-      // Render extras if present (skip metrics already shown inline or irrelevant)
+      // Render extras if present — filter by mode to keep reports focused
       // Card mode: skip all extras — YC/RC/fouls/tackles/interceptions already inline
       if (!isCardMode && m.extras && Object.keys(m.extras).length > 0) {
+        const isCornerMode = opts.oddsLabel === 'Corner';
+        // Corner mode: only show metrics relevant to corner generation/effectiveness
+        const cornerAllowlist = new Set([
+          'xG', 'xGA', 'npxG', 'npxGA',
+          'PPDA', 'oppPPDA', 'deep', 'oppDeep',
+          'crossesAcc', 'oppCrossesAcc',
+          'blockedShots', 'oppBlockedShots',
+          'aerialDuelsPct', 'oppAerialDuelsPct',
+          'clearances', 'oppClearances',
+          'xPts', 'npxGD',
+        ]);
         const skip = isGoalMode
           ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep'])
           : undefined;
-        const extrasStr = this.formatExtras(m.extras, skip);
+        const allow = isCornerMode ? cornerAllowlist : undefined;
+        const extrasStr = this.formatExtras(m.extras, skip, allow);
         if (extrasStr) line1 += ` · ${extrasStr}`;
       }
 
@@ -738,15 +750,21 @@ export class MarkdownFormatter {
         header += this.formatH2HCardStats(m, teamA, teamB);
       }
 
-      // Render extras if present (skip in card mode — noise; skip inline metrics in goal mode)
+      // Render extras if present (skip in card mode — noise; filter by mode)
       if (!isCardMode) {
+        const isCornerMode = opts.oddsLabel === 'Corner';
         const skipKeys = isGoalMode ? new Set(['xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep']) : undefined;
+        const cornerAllowlist = isCornerMode ? new Set([
+          'xG', 'xGA', 'npxG', 'npxGA', 'PPDA', 'oppPPDA', 'deep', 'oppDeep',
+          'crossesAcc', 'oppCrossesAcc', 'blockedShots', 'oppBlockedShots',
+          'aerialDuelsPct', 'oppAerialDuelsPct', 'clearances', 'oppClearances', 'xPts', 'npxGD',
+        ]) : undefined;
         if (m.teamA_extras && Object.keys(m.teamA_extras).length > 0) {
-          const s = this.formatExtras(m.teamA_extras, skipKeys);
+          const s = this.formatExtras(m.teamA_extras, skipKeys, cornerAllowlist);
           if (s) header += ` · ${teamA}: ${s}`;
         }
         if (m.teamB_extras && Object.keys(m.teamB_extras).length > 0) {
-          const s = this.formatExtras(m.teamB_extras, skipKeys);
+          const s = this.formatExtras(m.teamB_extras, skipKeys, cornerAllowlist);
           if (s) header += ` · ${teamB}: ${s}`;
         }
       }
@@ -875,9 +893,9 @@ export class MarkdownFormatter {
     pass_completion_pct: 'Pass%',
   };
 
-  private formatExtras(extras: Record<string, string | number | null>, skip?: Set<string>): string {
+  private formatExtras(extras: Record<string, string | number | null>, skip?: Set<string>, allow?: Set<string>): string {
     return Object.entries(extras)
-      .filter(([k, v]) => v != null && !(skip?.has(k)))
+      .filter(([k, v]) => v != null && !(skip?.has(k)) && (!allow || allow.has(k)))
       .map(([key, val]) => {
         const label = MarkdownFormatter.EXTRAS_LABELS[key] ?? this.readableKey(key);
         return `${label}: ${val}`;

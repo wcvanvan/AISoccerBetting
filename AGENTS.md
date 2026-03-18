@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-TypeScript CLI + web dashboard for multi-market soccer betting analysis (corners, goals, cards). Three data pipelines produce a data report, then an analysis agent identifies value bets.
+TypeScript CLI + web dashboard for multi-market soccer betting prediction (corners, goals, cards). Three data pipelines produce a data report, then a prediction agent identifies value bets.
 
 **Data collection**:
 
@@ -11,9 +11,11 @@ TypeScript CLI + web dashboard for multi-market soccer betting analysis (corners
 3. **Corner odds agent** (corners pipeline only) — Claude Code CLI agent that combines The Odds API, sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.), and third-party comparison sites (sportsgambler.com, etc.).
 4. **Odds** (goals/cards pipelines) — The Odds API fetches pre-match markets from configured bookmakers using the Odds API (will be migrated to Claude Code CLI agent in the future).
 
-**Analysis** — Claude Opus reads the collected report via `claude --print` to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own analysis system prompt.
+**Prediction** — Claude Opus reads the collected report via `claude --print` to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own prediction system prompt.
 
-Output: data report (`{slug}-{market}.md`), analysis (`{slug}-{market}-analysis.md`), or standalone news (`{slug}-news.md`).
+**Presentation** — After prediction (or review), a presentation agent rewrites the output into an audience-ready summary. Hides data sources, model internals, and academic hedging; presents picks with authoritative AI-expert tone.
+
+Output: data report (`{slug}-{market}.md`), prediction (`{slug}-{market}-prediction.md`), presentation (`{slug}-{market}-prediction-presentation.md`), or standalone news (`{slug}-news.md`).
 
 ## Architecture
 
@@ -39,8 +41,11 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
      |   ])
      |   -> base report + news section + odds section (string concat)
      |
-     +-- analyzeReport (src/agent/) [if ANALYSIS_ENABLED=true]
-          +-- Claude Opus -> {slug}-analysis.md
+     +-- runPrediction (src/cli-shared.ts) [if PREDICTION_ENABLED=true]
+     |    +-- Claude Opus -> {slug}-prediction.md
+     |
+     +-- runPresentation (src/cli-shared.ts) [after prediction or review]
+          +-- Claude Opus (effort: medium) -> {slug}-prediction-presentation.md
 
 Web (scripts/build-web.ts -> dist/)
  |
@@ -77,11 +82,11 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 - `corner-odds-client.ts` — runs a Claude Code CLI agent (`claude --print`) that collects corner odds from three sources: The Odds API (via curl), sportsbook websites (via Playwright), and third-party comparison sites. Returns a `## Corner Odds` markdown section.
 - `prompts/corner-odds-system-prompt.ts` — system prompt instructing the agent on sources, output format, and data integrity rules.
 
-### Analysis agent (src/agent/)
+### Prediction agent (src/agent/)
 
-- `report-analyzer.ts` — analysis entry point, shells out to `claude --print`. Uses system prompts from `prompts/`.
+- `report-analyzer.ts` — prediction entry point, shells out to `claude --print`. Uses system prompts from `prompts/`. Accepts optional `model` and `effort` overrides.
 - `claude-cli.ts` — shared helper for running prompts via `claude --print`.
-- `prompts/` — market-specific system prompts (corners, goals, cards).
+- `prompts/` — market-specific prediction prompts (corners, goals, cards) and presentation prompts (`presentation-prediction-system-prompt.ts`, `presentation-review-system-prompt.ts`).
 
 ### Match news agent (src/agent/)
 
@@ -93,7 +98,7 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 - Build script (`scripts/build-web.ts`) scans `data/reports/` subdirectories, generates `dist/data/manifest.json` with match/market metadata, converts markdown to HTML via `marked`, copies `public/` assets to `dist/`.
 - Vanilla HTML/CSS/JS frontend (no framework), dark theme.
 - Matches page: date-paged view with pill navigation (keyboard left/right), matches grouped by league per date. Auto-lands on today or nearest future date.
-- Match detail: market tabs (goals/corners/cards) with sub-tabs (Value Picks / Full Analysis / Data Report).
+- Match detail: market tabs (goals/corners/cards) with sub-tabs (Value Picks / Full Prediction / Data Report). Value Picks tab uses presentation output when available, falling back to extracted `## Value Picks` section.
 - Reports stored in `data/reports/{matchDir}/` with `meta.json` for league metadata.
 - Deployed to Vercel (`vercel.json` → `outputDirectory: dist`).
 
@@ -115,10 +120,10 @@ npm run corners "TeamA" "TeamB" "YYYY-MM-DD"
 npm run goals "TeamA" "TeamB" "YYYY-MM-DD"
 npm run cards "TeamA" "TeamB" "YYYY-MM-DD"
 
-# Analyse an existing report
-npm run corners:analyze <report.md>
-npm run goals:analyze <report.md>
-npm run cards:analyze <report.md>
+# Run prediction on an existing report
+npm run corners:predict <report.md>
+npm run goals:predict <report.md>
+npm run cards:predict <report.md>
 
 # Fetch match news
 npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
@@ -143,7 +148,9 @@ Secrets go in `.env` (git-ignored). Non-secret defaults live in `.env.defaults` 
 | `THE_ODDS_API_KEY` | Betting odds (required for odds fetching) |
 | `VERCEL_TOKEN` | Vercel deploy token (for manual deploys) |
 | `MATCH_NEWS_FETCHING` | When `true`, news collection is integrated into data pipelines. Otherwise news must be fetched separately via `:news` commands. |
-| `ANALYSIS_ENABLED` | When `true`, analysis runs automatically after data collection |
+| `PREDICTION_ENABLED` | When `true`, prediction runs automatically after data collection |
+| `PREDICTION_MODEL` | Claude model for prediction (default: claude-opus-4-6) |
+| `PRESENTATION_MODEL` | Claude model for presentation rewrites (default: claude-opus-4-6) |
 
 ## Output files
 
@@ -153,11 +160,13 @@ All outputs live under `data/reports/{teamA}-vs-{teamB}-{date}/`.
 |---|---|---|
 | `meta.json` | JSON | Match metadata (teams, kickoff, league) |
 | `{market}.md` | Compact, structured | Data report for downstream agents |
-| `{market}-analysis.md` | Human-readable markdown | Opus betting analysis |
+| `{market}-prediction.md` | Human-readable markdown | Opus betting prediction |
 | `news.md` | Plain text with source URLs | Match news (absences, injuries) |
 | `corner-odds.md` | Markdown tables | Corner odds from Odds API + sportsbook scraping |
+| `{market}-prediction-presentation.md` | Markdown | Audience-ready prediction summary (hides methodology) |
 | `{market}-results.md` | Markdown | Post-game results (soccerdata + narrative) |
-| `{market}-review.md` | Markdown | Review comparing pre-game forecast vs actuals |
+| `{market}-review.md` | Markdown | Review comparing prediction vs actuals |
+| `{market}-review-presentation.md` | Markdown | Audience-ready review summary (hides methodology) |
 
 ## Code conventions
 - **No inline values**: never hardcode prompts, env var names, or configuration values inline in consuming code. Always define them in a centralized module and import from there. System prompts live in `src/agent/prompts/`, market configs in `src/odds/market-config.ts`, etc.

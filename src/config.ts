@@ -18,19 +18,25 @@ export const config = {
     return envBool('MATCH_NEWS_FETCHING');
   },
 
-  get analysisEnabled(): boolean {
-    return envBool('ANALYSIS_ENABLED');
+  get predictionEnabled(): boolean {
+    return envBool('PREDICTION_ENABLED') || envBool('ANALYSIS_ENABLED');
   },
 
-  analysis: {
+  prediction: {
     get model(): string {
-      return optionalEnv('ANALYSIS_MODEL') ?? 'claude-opus-4-6';
+      return optionalEnv('PREDICTION_MODEL') ?? optionalEnv('ANALYSIS_MODEL') ?? 'claude-opus-4-6';
     },
   },
 
   news: {
     get model(): string {
       return optionalEnv('WEB_SEARCH_MODEL') ?? 'claude-opus-4-6';
+    },
+  },
+
+  presentation: {
+    get model(): string {
+      return optionalEnv('PRESENTATION_MODEL') ?? 'claude-opus-4-6';
     },
   },
 } as const;

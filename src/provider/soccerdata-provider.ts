@@ -123,6 +123,19 @@ export interface MatchLineups {
   away: LineupSide;
 }
 
+/** A single stat item from Sofascore statistics (home + away values) */
+export interface SofascoreStatItem {
+  home: string | number | null;
+  away: string | number | null;
+  group: string;
+}
+
+/**
+ * Sofascore match statistics keyed by period ("ALL", "1ST", "2ND"),
+ * then by stat key (e.g. "cornerKicks", "ballPossession", "expectedGoals").
+ */
+export type SofascoreMatchStats = Record<string, Record<string, SofascoreStatItem>>;
+
 export class SoccerdataProvider implements DataProvider {
   readonly name = 'soccerdata';
 
@@ -318,6 +331,21 @@ export class SoccerdataProvider implements DataProvider {
       home: toSide(raw.home),
       away: toSide(raw.away),
     };
+  }
+
+  /**
+   * Fetch post-game match statistics from Sofascore.
+   * Returns per-period stats (ALL, 1ST, 2ND) including corners, shots, duels, etc.
+   * Returns null if match not found or stats not available.
+   */
+  async getSofascoreMatchStats(teamA: string, teamB: string, matchDate: string): Promise<SofascoreMatchStats | null> {
+    const result = await this.call('get_sofascore_match_stats', {
+      team_a: teamA,
+      team_b: teamB,
+      match_date: matchDate,
+    });
+    if (result == null || typeof result !== 'object') return null;
+    return result as SofascoreMatchStats;
   }
 
   dispose(): void {

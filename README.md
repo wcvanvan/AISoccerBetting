@@ -1,6 +1,6 @@
 # AISoccerBetting
 
-Multi-market soccer betting analysis tool with a web dashboard and CLI pipelines. Collects match data from ESPN and Understat, fetches betting odds, and runs AI-powered analysis via Claude.
+Multi-market soccer betting prediction tool with a web dashboard and CLI pipelines. Collects match data from ESPN and Understat, fetches betting odds, and runs AI-powered predictions via Claude.
 
 ## Setup
 
@@ -19,7 +19,7 @@ Required keys in `.env`:
 npm run web      # build + serve locally at http://localhost:3001
 ```
 
-Displays pre-generated analysis reports. No server or authentication — just HTML files built from the markdown reports in `data/reports/`.
+Displays pre-generated prediction reports. No server or authentication — just HTML files built from the markdown reports in `data/reports/`.
 
 Deployed to Vercel automatically via `git push` (runs `vercel-build` → `npm run build`).
 
@@ -37,17 +37,17 @@ npm run cards "TeamA" "TeamB" "YYYY-MM-DD"
 
 Runs soccerdata collection + odds. Writes `{slug}-{market}.md`.
 
-### Analyse an existing report
+### Run prediction on an existing report
 
 ```bash
-npm run goals:analyze <report.md>
-npm run corners:analyze <report.md>
-npm run cards:analyze <report.md>
+npm run goals:predict <report.md>
+npm run corners:predict <report.md>
+npm run cards:predict <report.md>
 ```
 
-Reads an existing report and runs Claude Opus analysis. Writes `{slug}-{market}-analysis.md`.
+Reads an existing report and runs Claude Opus prediction. Writes `{slug}-{market}-prediction.md` and `{slug}-{market}-prediction-presentation.md` (audience-ready summary).
 
-Analysis and news collection use the Claude Code CLI (`claude --print`) — no Anthropic API key required.
+Prediction and news collection use the Claude Code CLI (`claude --print`) — no Anthropic API key required.
 
 ### Fetch match news
 
@@ -84,7 +84,8 @@ Non-secret defaults live in `.env.defaults` (committed). Secrets go in `.env` (g
 | Variable | Purpose |
 |----------|---------|
 | `THE_ODDS_API_KEY` | Betting odds (required for odds) |
-| `ANALYSIS_MODEL` | Claude model for analysis (default: claude-opus-4-6) |
+| `PREDICTION_MODEL` | Claude model for prediction (default: claude-opus-4-6) |
+| `PRESENTATION_MODEL` | Claude model for presentation rewrites (default: claude-opus-4-6) |
 | `WEB_SEARCH_MODEL` | Claude model for news (default: claude-opus-4-6) |
 
 See `.env.defaults` for all configurable options.

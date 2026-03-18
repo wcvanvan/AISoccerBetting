@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * CLI entry point for goal market betting analysis pipeline.
+ * CLI entry point for goal market betting prediction pipeline.
  */
 
 import { bootstrapEnv } from './cli-bootstrap';
@@ -10,15 +10,15 @@ bootstrapEnv();
 import { runPipeline } from './cli-shared';
 import { GOAL_MARKET_CONFIG } from './odds';
 import {
-  GOAL_ANALYSIS_SYSTEM_PROMPT,
-  GOAL_RESULTS_NARRATIVE_PROMPT,
+  GOAL_PREDICTION_SYSTEM_PROMPT,
+  GOAL_RESULTS_COLLECTION_PROMPT,
   GOAL_REVIEW_SYSTEM_PROMPT,
 } from './agent';
 
 runPipeline({
   marketConfig: GOAL_MARKET_CONFIG,
-  analysisPrompt: GOAL_ANALYSIS_SYSTEM_PROMPT,
-  resultsNarrativePrompt: GOAL_RESULTS_NARRATIVE_PROMPT,
+  predictionPrompt: GOAL_PREDICTION_SYSTEM_PROMPT,
+  resultsCollectionPrompt: GOAL_RESULTS_COLLECTION_PROMPT,
   reviewPrompt: GOAL_REVIEW_SYSTEM_PROMPT,
   formatOptions: { showCorners: false, oddsLabel: 'Goal' },
   toolName: 'goals',

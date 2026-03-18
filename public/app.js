@@ -368,7 +368,7 @@ function renderInlineMarketBadges(cell, markets) {
   let hasSome = false;
   marketNames.forEach((m) => {
     const info = markets[m];
-    if (info && (info.hasReport || info.hasAnalysis || info.hasResults || info.hasReview)) {
+    if (info && (info.hasReport || info.hasPrediction || info.hasResults || info.hasReview)) {
       hasSome = true;
       const badge = document.createElement('span');
       let badgeClass = ' cache-partial';
@@ -376,9 +376,9 @@ function renderInlineMarketBadges(cell, markets) {
       if (info.hasReview) {
         badgeClass = ' cache-reviewed';
         title = m + ': reviewed';
-      } else if (info.hasAnalysis) {
+      } else if (info.hasPrediction) {
         badgeClass = ' cache-full';
-        title = m + ': report + analysis';
+        title = m + ': report + prediction';
       }
       badge.className = 'cache-badge' + badgeClass;
       badge.title = title;
@@ -502,7 +502,7 @@ function loadMarketData() {
   if (!currentMatch) return;
 
   const marketInfo = (currentMatch.markets || {})[currentMarket];
-  if (marketInfo && (marketInfo.hasReport || marketInfo.hasAnalysis || marketInfo.hasResults || marketInfo.hasReview)) {
+  if (marketInfo && (marketInfo.hasReport || marketInfo.hasPrediction || marketInfo.hasResults || marketInfo.hasReview)) {
     renderMatchCachedResults(currentMatch, currentMarket, marketInfo);
     return;
   }
@@ -514,6 +514,10 @@ function loadMarketData() {
   emptyDiv.appendChild(emptyP);
   resultsArea.textContent = '';
   resultsArea.appendChild(emptyDiv);
+  // Still show comment section even when no market data exists
+  if (typeof renderCommentSection === 'function') {
+    renderCommentSection(resultsArea, currentMatch.matchId, currentMarket);
+  }
 }
 
 function renderMatchCachedResults(match, market, marketInfo) {
@@ -524,6 +528,10 @@ function renderMatchCachedResults(match, market, marketInfo) {
     const url = 'data/reports/' + mid + '/' + market + '-' + tab + '.html';
     return loadReportTab(container, url, contentKey + ':' + tab);
   });
+  // Append comment section below tabs
+  if (typeof renderCommentSection === 'function') {
+    renderCommentSection(resultsArea, mid, market);
+  }
 }
 
 // ── Shared tab rendering ────────────────────────────────────────────────────
@@ -584,9 +592,9 @@ function renderResultTabs(targetEl, marketInfo, loadFn) {
 
   // Pre-game tabs
   const tabDefs = [];
-  if (marketInfo.hasAnalysis) {
+  if (marketInfo.hasPrediction) {
     tabDefs.push({ key: 'concise', label: 'Value Picks' });
-    tabDefs.push({ key: 'analysis', label: 'Full Analysis' });
+    tabDefs.push({ key: 'prediction', label: 'Full Prediction' });
   }
   if (marketInfo.hasReport) {
     tabDefs.push({ key: 'raw', label: 'Data Report' });

@@ -9,7 +9,7 @@ import * as fs from 'fs';
 const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 
 import { MatchDataCollector } from './collector';
-import { runMatchNews, runCornerOdds, analyzeReport } from './agent';
+import { runMatchNews, runCornerOdds, analyzeReport, PRESENTATION_PREDICTION_SYSTEM_PROMPT, PRESENTATION_REVIEW_SYSTEM_PROMPT } from './agent';
 import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel, resolveSportKeys } from './odds';
 import { OddsEvent } from './odds/types';
 import * as readline from 'readline';
@@ -22,10 +22,10 @@ import { config } from './config';
 export interface PipelineConfig {
   /** Which odds markets to fetch */
   marketConfig: MarketConfig;
-  /** System prompt for analysis */
-  analysisPrompt: string;
-  /** Narrative prompt for post-game results collection (via Claude CLI) */
-  resultsNarrativePrompt: string;
+  /** System prompt for prediction */
+  predictionPrompt: string;
+  /** System prompt for post-game result collection (via Claude CLI) */
+  resultsCollectionPrompt: string;
   /** System prompt for review/reflection generation */
   reviewPrompt: string;
   /** Format options controlling report output */
@@ -48,8 +48,8 @@ type CollectArgs = {
   teamB: string;
 };
 
-type AnalyzeArgs = {
-  mode: 'analyze';
+type PredictArgs = {
+  mode: 'predict';
   reportPath: string;
 };
 
@@ -81,23 +81,23 @@ type ReviewArgs = {
   matchDir: string;
 };
 
-type ParsedArgs = CollectArgs | AnalyzeArgs | NewsArgs | OddsArgs | CornerOddsArgs | ResultsArgs | ReviewArgs | null;
+type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | OddsArgs | CornerOddsArgs | ResultsArgs | ReviewArgs | null;
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
 function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
   const argv = process.argv.slice(2);
 
-  // --analyze <report.md>
-  const analyzeIdx = argv.indexOf('--analyze');
-  if (analyzeIdx !== -1) {
-    const reportPath = argv[analyzeIdx + 1];
+  // --predict <report.md>
+  const predictIdx = argv.indexOf('--predict');
+  if (predictIdx !== -1) {
+    const reportPath = argv[predictIdx + 1];
     if (!reportPath) {
-      console.error('Error: --analyze requires a path to a report file');
+      console.error('Error: --predict requires a path to a report file');
       printUsage(toolName, marketLabel);
       return null;
     }
-    return { mode: 'analyze', reportPath };
+    return { mode: 'predict', reportPath };
   }
 
   // --news teamA teamB
@@ -177,12 +177,12 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
 
 function printUsage(toolName: string, marketLabel: string): void {
   console.log(`
-Soccer Betting Analyzer — ${marketLabel} Markets
+Soccer Betting Predictor — ${marketLabel} Markets
 ${'='.repeat(42 + marketLabel.length)}
 
 Usage:
   npm run ${toolName} "TeamA" "TeamB"             Collect data (date auto-resolved from Odds API)
-  npm run ${toolName}:analyze <report.md>         Analyse existing report → {slug}-analysis.md
+  npm run ${toolName}:predict <report.md>         Run prediction on existing report → {slug}-prediction.md
   npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
   npm run ${toolName}:odds "TeamA" "TeamB"        ${toolName === 'corners' ? 'Collect corner odds via agent (API + sportsbooks)' : `Fetch ${marketLabel.toLowerCase()} odds for a match`}${toolName !== 'corners' ? `
   npm run ${toolName}:odds                        List upcoming events` : ''}
@@ -209,25 +209,43 @@ export { slug, buildMatchDir, buildReportFilename } from './utils/report-naming'
 import {
   buildMatchDir,
   buildReportFilename as _buildReportFilename,
-  buildAnalysisFilename as _buildAnalysisFilename,
+  buildPredictionFilename as _buildPredictionFilename,
   buildNewsFilename as _buildNewsFilename,
   buildResultsFilename as _buildResultsFilename,
   buildReviewFilename as _buildReviewFilename,
 } from './utils/report-naming';
 import { collectMatchResults, type MatchMeta } from './collector/match-results-collector';
 
-// ── Analysis runner ─────────────────────────────────────────────────────────
+// ── Prediction runner ───────────────────────────────────────────────────────
 
-async function runAnalysis(
+async function runPrediction(
   reportMarkdown: string,
-  analysisFilename: string,
+  predictionFilename: string,
   systemPrompt: string,
   marketLabel: string,
+): Promise<string> {
+  console.log(`Running ${marketLabel.toLowerCase()} betting prediction with Opus...`);
+  const prediction = await analyzeReport(reportMarkdown, systemPrompt);
+  fs.writeFileSync(predictionFilename, prediction, 'utf8');
+  console.log(`Prediction saved → ${predictionFilename}`);
+  return prediction;
+}
+
+// ── Presentation runner ─────────────────────────────────────────────────────
+
+async function runPresentation(
+  sourceMarkdown: string,
+  outputFilename: string,
+  systemPrompt: string,
+  label: string,
 ): Promise<void> {
-  console.log(`Running ${marketLabel.toLowerCase()} betting analysis with Opus...`);
-  const analysis = await analyzeReport(reportMarkdown, systemPrompt);
-  fs.writeFileSync(analysisFilename, analysis, 'utf8');
-  console.log(`Analysis saved → ${analysisFilename}`);
+  console.log(`Running ${label} presentation rewrite...`);
+  const presentation = await analyzeReport(sourceMarkdown, systemPrompt, {
+    model: config.presentation.model,
+    effort: 'medium',
+  });
+  fs.writeFileSync(outputFilename, presentation, 'utf8');
+  console.log(`Presentation saved → ${outputFilename}`);
 }
 
 // ── Odds helpers ────────────────────────────────────────────────────────────
@@ -361,7 +379,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
 
   const {
     marketConfig,
-    analysisPrompt,
+    predictionPrompt,
     formatOptions,
     toolName,
     marketLabel,
@@ -372,21 +390,25 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     process.exit(1);
   }
 
-  // ── Standalone analysis mode ──
-  if (args.mode === 'analyze') {
+  // ── Standalone prediction mode ──
+  if (args.mode === 'predict') {
     const reportPath = path.resolve(args.reportPath);
     if (!fs.existsSync(reportPath)) {
       console.error(`Error: File not found: ${reportPath}`);
       process.exit(1);
     }
     const reportMarkdown = fs.readFileSync(reportPath, 'utf8');
-    const analysisFilename = reportPath.replace(/\.md$/, '-analysis.md');
+    const predictionFilename = reportPath.replace(/\.md$/, '-prediction.md');
     try {
-      await runAnalysis(reportMarkdown, analysisFilename, analysisPrompt, marketLabel);
+      const predictionOutput = await runPrediction(reportMarkdown, predictionFilename, predictionPrompt, marketLabel);
+      const presentationFile = predictionFilename.replace(/-prediction\.md$/, '-prediction-presentation.md');
+      try {
+        await runPresentation(predictionOutput, presentationFile, PRESENTATION_PREDICTION_SYSTEM_PROMPT, marketLabel.toLowerCase());
+      } catch (err) { console.error(`Presentation skipped: ${errorMsg(err)}`); }
       process.exit(0);
     } catch (err) {
       const msg = errorMsg(err);
-      console.error(`Analysis failed: ${msg}`);
+      console.error(`Prediction failed: ${msg}`);
       process.exit(1);
     }
   }
@@ -468,7 +490,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
         matchDir: args.matchDir,
         meta,
         market: toolName,
-        narrativePrompt: pipelineConfig.resultsNarrativePrompt,
+        narrativePrompt: pipelineConfig.resultsCollectionPrompt,
       });
       fs.writeFileSync(resultsPath, markdown, 'utf8');
       console.log(`Results saved → ${resultsPath}`);
@@ -485,7 +507,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     try {
       const meta = readMatchMeta(args.matchDir);
       const resultsPath = path.join(REPORTS_DIR, _buildResultsFilename(args.matchDir, toolName));
-      const analysisPath = path.join(REPORTS_DIR, args.matchDir, `${toolName}-analysis.md`);
+      const predictionPath = path.join(REPORTS_DIR, args.matchDir, `${toolName}-prediction.md`);
       const reviewPath = path.join(REPORTS_DIR, _buildReviewFilename(args.matchDir, toolName));
       const reviewDir = path.dirname(reviewPath);
       if (!fs.existsSync(reviewDir)) fs.mkdirSync(reviewDir, { recursive: true });
@@ -496,16 +518,16 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       }
 
       const resultsMarkdown = fs.readFileSync(resultsPath, 'utf8');
-      let analysisMarkdown = '';
-      if (fs.existsSync(analysisPath)) {
-        analysisMarkdown = fs.readFileSync(analysisPath, 'utf8');
+      let predictionMarkdown = '';
+      if (fs.existsSync(predictionPath)) {
+        predictionMarkdown = fs.readFileSync(predictionPath, 'utf8');
       } else {
-        console.warn(`Warning: ${toolName}-analysis.md not found — review will proceed without pre-game analysis.`);
+        console.warn(`Warning: ${toolName}-prediction.md not found — review will proceed without prediction.`);
       }
 
       // Concatenate with clear headers for the review agent
       const combined = [
-        analysisMarkdown ? `# PRE-GAME ANALYSIS\n\n${analysisMarkdown}` : '# PRE-GAME ANALYSIS\n\n*No pre-game analysis available.*',
+        predictionMarkdown ? `# PREDICTION\n\n${predictionMarkdown}` : '# PREDICTION\n\n*No prediction available.*',
         `# POST-GAME RESULTS\n\n${resultsMarkdown}`,
       ].join('\n\n---\n\n');
 
@@ -513,6 +535,10 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       const review = await analyzeReport(combined, pipelineConfig.reviewPrompt);
       fs.writeFileSync(reviewPath, review, 'utf8');
       console.log(`Review saved → ${reviewPath}`);
+      const reviewPresentationPath = reviewPath.replace(/-review\.md$/, '-review-presentation.md');
+      try {
+        await runPresentation(review, reviewPresentationPath, PRESENTATION_REVIEW_SYSTEM_PROMPT, `${marketLabel.toLowerCase()} review`);
+      } catch (err) { console.error(`Review presentation skipped: ${errorMsg(err)}`); }
       process.exit(0);
     } catch (err) {
       const msg = errorMsg(err);
@@ -581,13 +607,17 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     });
     console.log(`Report saved → ${reportFilename}`);
 
-    if (config.analysisEnabled) {
+    if (config.predictionEnabled) {
       try {
-        const analysisFilename = path.join(REPORTS_DIR, _buildAnalysisFilename(args.teamA, args.teamB, resolved.date, toolName));
-        await runAnalysis(markdown, analysisFilename, analysisPrompt, marketLabel);
+        const predictionFilename = path.join(REPORTS_DIR, _buildPredictionFilename(args.teamA, args.teamB, resolved.date, toolName));
+        const predictionOutput = await runPrediction(markdown, predictionFilename, predictionPrompt, marketLabel);
+        const presentationPath = predictionFilename.replace(/-prediction\.md$/, '-prediction-presentation.md');
+        try {
+          await runPresentation(predictionOutput, presentationPath, PRESENTATION_PREDICTION_SYSTEM_PROMPT, marketLabel.toLowerCase());
+        } catch (err) { console.error(`Presentation skipped: ${errorMsg(err)}`); }
       } catch (err) {
         const msg = errorMsg(err);
-        console.error(`Analysis skipped: ${msg}`);
+        console.error(`Prediction skipped: ${msg}`);
       }
     }
 

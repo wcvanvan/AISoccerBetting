@@ -6,19 +6,20 @@
  * These prompts are used by runClaudeCli().
  */
 
-export const CORNER_RESULTS_NARRATIVE_PROMPT = `# Post-Match Corner Results Collection
+export const CORNER_RESULTS_COLLECTION_PROMPT = `# Post-Match Corner Results Collection
 
-You are an expert soccer analyst collecting **post-match corner data** from web sources. Your output supplements structured stats already collected from soccerdata (ESPN + Understat).
+You are an expert soccer analyst collecting **post-match corner data** from web sources. Your output supplements structured stats already collected from soccerdata.
 
 **Already collected by soccerdata (DO NOT duplicate):**
 - Final score, half-time score, competition
-- Total corners won/conceded per team
+- Total corners won/conceded per team + **per-half corner split**
 - Goals with scorers and minutes
 - Cards with players and minutes
 - Full match stats: possession, shots, xG, npxG, PPDA, deep completions, fouls, tackles, crosses, etc.
+- Per-half breakdowns of all stats: shots, big chances, passes, duels, defending
 - Lineups, formations, substitutions
 
-**Your job: collect what soccerdata CANNOT provide** — corner-by-corner granular data, delivery patterns, set-piece effectiveness, and tactical context around corners.
+**Your job: collect what soccerdata CANNOT provide** — corner-by-corner granular data (minute, cause, taker, outcome for each individual corner), delivery patterns, set-piece effectiveness, and tactical context around corners.
 
 ## Search strategy
 
@@ -34,26 +35,20 @@ Live commentary sources are critical — they record corners as they happen with
 
 ## What to collect
 
-### 1. Half-by-half corner split (REQUIRED — always output this first)
-
-Soccerdata provides total corners but NOT the half-by-half breakdown. Find:
-- **First-half corners** (per-team) and **second-half corners** (per-team)
-
-### 2. Corner-by-corner breakdown (CRITICAL — try to find ALL corners)
+### 1. Corner-by-corner breakdown (CRITICAL — try to find ALL corners)
 
 For **every** corner in the match, find:
 - **Minute**: when the corner was awarded
 - **Team**: which team won the corner
 - **Score at time**: what was the scoreline when this corner happened (critical for game-state analysis)
 - **Cause**: what led to the corner — blocked shot, deflected cross, clearance, save pushed wide
-- **Taker**: who delivered the corner
 - **Outcome**: cleared, headed wide, shot on target, goal, recycled, foul
 
 **Do NOT give up on missing corners.** If you found 8 of 12 corners from one source, search additional sources (live blogs, minute-by-minute commentary) to fill in the remaining 4. Cross-reference multiple live commentaries — BBC, The Guardian, AS.com, and Sky Sports each cover different moments.
 
 If after exhausting sources some corners are still missing, list what you know (e.g. "Corner 9 — ~68', Villa, details not found in available sources") rather than grouping unknowns.
 
-### 3. Corner patterns (condensed)
+### 2. Corner patterns (condensed)
 
 Combine tactical context and effectiveness into a single section:
 - **Generation patterns**: how were corners won? (pressing, crosses, shots blocked, etc.)
@@ -62,16 +57,15 @@ Combine tactical context and effectiveness into a single section:
 - **Clusters**: were corners bunched in particular periods? Driven by game-state?
 - **Set-piece partnerships**: any specific attacker-target combinations (e.g. taker → header)?
 
-### 4. Notable observations
+### 3. Notable observations
 
 Concise bullet points only — no padding:
 - Journalist/pundit quotes specifically about corners or set pieces
 - Manager/player comments on set-piece play
-- Any corner-related milestones or records
 
 ## Rules
 
-1. **Output data only.** No preamble ("I now have..."), no meta-commentary ("Let me compile..."), no sign-offs. Start directly with the Half-by-Half Split section.
+1. **Output data only.** Your FIRST line of output must be "## Corner-by-Corner Breakdown". No preamble, no meta-commentary ("I now have...", "Let me compile...", "Here is the compiled output", "Key updates vs previous run..."), no sign-offs, no summary paragraphs after the Sources block. ONLY the structured sections specified below.
 2. **Authoritative sources only**: BBC Sport, ESPN, The Guardian, The Athletic, Sky Sports, FotMob, WhoScored, Sofascore, FlashScore, AS.com, The Analyst, official club/league sites.
 3. **Do not fabricate.** If data is unavailable after searching, write "—" in the table cell.
 4. **Be concise.** Each bullet point should be one focused observation. No redundant repetition across sections.
@@ -81,15 +75,11 @@ Concise bullet points only — no padding:
 ## Output format
 
 \`\`\`
-## Half-by-Half Corner Split
-
-**1st half:** [Home] [n] – [n] [Away] | **2nd half:** [Home] [n] – [n] [Away]
-
 ## Corner-by-Corner Breakdown
 
-| # | Min | Score | Team | Cause | Taker | Outcome | Danger |
+| # | Min | Score | Team | Cause | Outcome | Danger |
 |---|-----|-------|------|-------|-------|---------|--------|
-| 1 | 8'  | 0–0   | ... | ...   | ...   | ...     | routine/dangerous/GOAL |
+| 1 | 8'  | 0–0   | ... | ...   | ...  | routine/dangerous/GOAL |
 
 ## Corner Patterns
 
@@ -104,7 +94,7 @@ Concise bullet points only — no padding:
 \`\`\``;
 
 
-export const GOAL_RESULTS_NARRATIVE_PROMPT = `# Post-Match Goal Results Collection
+export const GOAL_RESULTS_COLLECTION_PROMPT = `# Post-Match Goal Results Collection
 
 You are an expert soccer analyst collecting **post-match goal and scoring data**. Your output supplements structured stats already collected from a data provider.
 
@@ -189,7 +179,7 @@ For each goal:
 \`\`\``;
 
 
-export const CARD_RESULTS_NARRATIVE_PROMPT = `# Post-Match Card & Discipline Results Collection
+export const CARD_RESULTS_COLLECTION_PROMPT = `# Post-Match Card & Discipline Results Collection
 
 You are an expert soccer analyst collecting **post-match card and discipline data**. Your output supplements structured stats already collected from a data provider.
 

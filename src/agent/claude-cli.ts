@@ -16,7 +16,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '../..');
 export interface ClaudeCliOptions {
   /** Optional log callback for stderr lines */
   onLog?: (line: string) => void;
-  /** Override the model (defaults to config.analysis.model) */
+  /** Override the model (defaults to config.prediction.model) */
   model?: string;
   /** Override max output tokens (defaults to 128000) */
   maxOutputTokens?: number;
@@ -47,7 +47,7 @@ export function runClaudeCli(
     delete env.CLAUDE_CODE_ENTRYPOINT;
     env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(opts.maxOutputTokens ?? 128_000);
 
-    const model = opts.model ?? config.analysis.model;
+    const model = opts.model ?? config.prediction.model;
     const child = spawn(
       'claude',
       [

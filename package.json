@@ -8,15 +8,15 @@
     "build": "ts-node scripts/build-web.ts",
     "start": "ts-node src/cli-corners.ts",
     "corners": "ts-node src/cli-corners.ts",
-    "corners:analyze": "ts-node src/cli-corners.ts --analyze",
+    "corners:predict": "ts-node src/cli-corners.ts --predict",
     "corners:news": "ts-node src/cli-corners.ts --news",
     "corners:odds": "ts-node src/cli-corners.ts --corner-odds",
     "goals": "ts-node src/cli-goals.ts",
-    "goals:analyze": "ts-node src/cli-goals.ts --analyze",
+    "goals:predict": "ts-node src/cli-goals.ts --predict",
     "goals:news": "ts-node src/cli-goals.ts --news",
     "goals:odds": "ts-node src/cli-goals.ts --odds",
     "cards": "ts-node src/cli-cards.ts",
-    "cards:analyze": "ts-node src/cli-cards.ts --analyze",
+    "cards:predict": "ts-node src/cli-cards.ts --predict",
     "cards:news": "ts-node src/cli-cards.ts --news",
     "cards:odds": "ts-node src/cli-cards.ts --odds",
     "corners:results": "ts-node src/cli-corners.ts --results",
@@ -50,6 +50,8 @@
   },
   "dependencies": {
     "@playwright/test": "^1.58.2",
-    "marked": "^17.0.4"
+    "@upstash/redis": "^1.37.0",
+    "marked": "^17.0.4",
+    "vercel": "^50.33.0"
   }
 }
