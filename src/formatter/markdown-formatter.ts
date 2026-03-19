@@ -15,7 +15,7 @@ import {
   Substitute,
   SubbedOffPlayer,
 } from '../types';
-import { TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext, MatchLineups, LineupSide } from '../provider/soccerdata-provider';
+import { TeamSeasonStats, LeagueContext, MatchLineups, LineupSide } from '../provider/soccerdata-provider';
 
 export interface FormatOptions {
   /** Show corner data in match lines (default: true) */
@@ -78,8 +78,6 @@ export class MarkdownFormatter {
     teamA_season?: TeamSeasonStats,
     teamB_season?: TeamSeasonStats,
     leagueContext?: LeagueContext,
-    refereeStats?: RefereeStats,
-    leagueCardContext?: LeagueCardContext,
     lineups?: MatchLineups,
   ): string {
     const opts = { ...DEFAULT_FORMAT_OPTIONS, ...formatOptions };
@@ -123,18 +121,6 @@ export class MarkdownFormatter {
         s.push(`### ${teamB_name} (Away filter)\n`);
         s.push(this.formatGoalSummary(teamB_matches, 'A'));
       }
-    }
-
-    // Referee stats (card mode only)
-    if (isCardMode && refereeStats) {
-      s.push(`## Referee Stats\n`);
-      s.push(this.formatRefereeStats(refereeStats));
-    }
-
-    // League card context (card mode only)
-    if (isCardMode && leagueCardContext) {
-      s.push(`## League Card Context\n`);
-      s.push(this.formatLeagueCardContext(leagueCardContext));
     }
 
     // Pre-computed card stats summary (card mode only)
@@ -669,54 +655,6 @@ export class MarkdownFormatter {
       }
     }
 
-    return lines.join('\n') + '\n';
-  }
-
-  // ── Referee Stats ─────────────────────────────────────────────────────
-
-  private formatRefereeStats(stats: RefereeStats): string {
-    const lines: string[] = [];
-
-    if (stats.matchReferee) {
-      const r = stats.matchReferee;
-      lines.push(`**Match Referee: ${r.name}** (${r.games} games in database)`);
-      lines.push(`- Cards/game: ${r.cardsPerGame} (YC ${r.yellowsPerGame}, RC ${r.redsPerGame})`);
-      lines.push(`- Fouls/game: ${r.foulsPerGame}`);
-      lines.push(`- Home cards %: ${r.homeCardsPct}%`);
-      if (r.leagues.length > 0) {
-        lines.push(`- Leagues: ${r.leagues.join(', ')}`);
-      }
-    } else {
-      lines.push('**Match Referee: Not yet assigned / unknown**');
-      lines.push('Note: referee assignment is typically confirmed 2-3 days before the match.');
-    }
-
-    const la = stats.leagueAverage;
-    lines.push('');
-    lines.push(`**League Average** (${la.games} games):`);
-    lines.push(`- Cards/game: ${la.cardsPerGame} (YC ${la.yellowsPerGame}, RC ${la.redsPerGame})`);
-    lines.push(`- Fouls/game: ${la.foulsPerGame}`);
-
-    if (stats.matchReferee && la.cardsPerGame > 0) {
-      const delta = stats.matchReferee.cardsPerGame - la.cardsPerGame;
-      const pctDelta = ((delta / la.cardsPerGame) * 100).toFixed(1);
-      const dir = delta > 0 ? 'ABOVE' : delta < 0 ? 'BELOW' : 'AT';
-      lines.push(`- **Referee vs league: ${delta > 0 ? '+' : ''}${delta.toFixed(2)} cards/game (${pctDelta}% ${dir} average)**`);
-    }
-
-    return lines.join('\n') + '\n';
-  }
-
-  // ── League Card Context ───────────────────────────────────────────────
-
-  private formatLeagueCardContext(ctx: LeagueCardContext): string {
-    const lines: string[] = [];
-    lines.push(`Based on ${ctx.matches} ${ctx.league} matches this season:`);
-    lines.push(`- Cards/match: ${ctx.avgCardsPerMatch} (YC ${ctx.avgYellowsPerMatch}, RC ${ctx.avgRedsPerMatch})`);
-    lines.push(`- Home cards: ${ctx.avgHomeCards} · Away cards: ${ctx.avgAwayCards}`);
-    lines.push(`- Fouls/match: ${ctx.avgFoulsPerMatch}`);
-    lines.push(`- Fouls per card: ${ctx.avgFoulsPerCard}`);
-    lines.push(`- Over 2.5 cards: ${ctx.over25CardsPct}% · Over 3.5: ${ctx.over35CardsPct}% · Over 4.5: ${ctx.over45CardsPct}% · Over 5.5: ${ctx.over55CardsPct}% · Over 6.5: ${ctx.over65CardsPct}%`);
     return lines.join('\n') + '\n';
   }
 

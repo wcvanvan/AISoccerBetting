@@ -4,7 +4,7 @@
  */
 
 import { DataProvider } from '../provider/data-provider';
-import { SoccerdataProvider, TeamSeasonStats, LeagueContext, RefereeStats, LeagueCardContext, MatchLineups } from '../provider/soccerdata-provider';
+import { HybridProvider, TeamSeasonStats, LeagueContext, MatchLineups } from '../provider/soccerdata-provider';
 import { MarkdownFormatter, FormatOptions } from '../formatter';
 import { MatchDetails, H2HMatch } from '../types';
 
@@ -83,8 +83,6 @@ export class MatchDataCollector {
       teamA_season?: TeamSeasonStats | null,
       teamB_season?: TeamSeasonStats | null,
       leagueContext?: LeagueContext | null,
-      refereeStats?: RefereeStats | null,
-      leagueCardContext?: LeagueCardContext | null,
       lineups?: MatchLineups | null,
     ): string =>
       this.markdownFormatter.format_output(
@@ -99,8 +97,6 @@ export class MatchDataCollector {
         teamA_season ?? undefined,
         teamB_season ?? undefined,
         leagueContext ?? undefined,
-        refereeStats ?? undefined,
-        leagueCardContext ?? undefined,
         lineups ?? undefined,
       );
 
@@ -110,12 +106,10 @@ export class MatchDataCollector {
 
       // Determine which enrichment data to fetch based on mode
       const isGoalMode = this.formatOptions?.oddsLabel === 'Goal';
-      const isCardMode = this.formatOptions?.oddsLabel === 'Card';
-      const isSoccerdata = this.provider instanceof SoccerdataProvider;
-      const canFetchSeasonStats = isGoalMode && isSoccerdata;
-      const canFetchCardContext = isCardMode && isSoccerdata;
+      const isHybrid = this.provider instanceof HybridProvider;
+      const canFetchSeasonStats = isGoalMode && isHybrid;
 
-      const [teamA_matches, teamB_matches, h2h_matches, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext, lineups] = await Promise.all([
+      const [teamA_matches, teamB_matches, h2h_matches, teamA_season, teamB_season, leagueContext, lineups] = await Promise.all([
         this.collectTeamMatches(teamA_id, normalizedInput.teamA_name),
         this.collectTeamMatches(teamB_id, normalizedInput.teamB_name),
         this.collectH2HMatches(
@@ -125,26 +119,20 @@ export class MatchDataCollector {
           normalizedInput.teamB_name
         ),
         canFetchSeasonStats
-          ? (this.provider as SoccerdataProvider).getTeamSeasonStats(normalizedInput.teamA_name).catch(() => null)
+          ? (this.provider as HybridProvider).getTeamSeasonStats(normalizedInput.teamA_name).catch(() => null)
           : Promise.resolve(null),
         canFetchSeasonStats
-          ? (this.provider as SoccerdataProvider).getTeamSeasonStats(normalizedInput.teamB_name).catch(() => null)
+          ? (this.provider as HybridProvider).getTeamSeasonStats(normalizedInput.teamB_name).catch(() => null)
           : Promise.resolve(null),
         canFetchSeasonStats
-          ? (this.provider as SoccerdataProvider).getLeagueContext(normalizedInput.teamA_name).catch(() => null)
+          ? (this.provider as HybridProvider).getLeagueContext(normalizedInput.teamA_name).catch(() => null)
           : Promise.resolve(null),
-        canFetchCardContext
-          ? (this.provider as SoccerdataProvider).getRefereeStats(normalizedInput.teamA_name, normalizedInput.teamB_name).catch(() => null)
-          : Promise.resolve(null),
-        canFetchCardContext
-          ? (this.provider as SoccerdataProvider).getLeagueCardContext(normalizedInput.teamA_name).catch(() => null)
-          : Promise.resolve(null),
-        isSoccerdata
-          ? (this.provider as SoccerdataProvider).getSofascoreLineups(normalizedInput.teamA_name, normalizedInput.teamB_name, normalizedInput.match_date).catch(() => null)
+        isHybrid
+          ? (this.provider as HybridProvider).getSofascoreLineups(normalizedInput.teamA_name, normalizedInput.teamB_name, normalizedInput.match_date).catch(() => null)
           : Promise.resolve(null),
       ]);
 
-      return format(teamA_matches, teamB_matches, h2h_matches, teamA_season, teamB_season, leagueContext, refereeStats, leagueCardContext, lineups);
+      return format(teamA_matches, teamB_matches, h2h_matches, teamA_season, teamB_season, leagueContext, lineups);
     } catch (error) {
       const errorMessage = errorMsg(error);
       this.alerts.push(`CRITICAL ERROR: ${errorMessage}`);

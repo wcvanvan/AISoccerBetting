@@ -14,7 +14,7 @@
 import { runClaudeCli } from '../agent/claude-cli';
 import { stripCodeFences } from '../agent/strip-code-fences';
 import { config } from '../config';
-import { SoccerdataProvider, SofascoreMatchStats } from '../provider';
+import { HybridProvider, SofascoreMatchStats } from '../provider';
 import { MatchDetails, MatchStats, GoalEvent, CardEvent } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -49,8 +49,9 @@ export async function collectMatchResults(input: CollectResultsInput): Promise<s
 
   // ── 1. Soccerdata (ESPN + Understat + Sofascore) ──
   let dataSection = '';
-  const provider = new SoccerdataProvider();
+  const provider = new HybridProvider();
   try {
+    await provider.init();
     dataSection = await collectSoccerdata(provider, homeTeam, awayTeam, date);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -79,7 +80,7 @@ export async function collectMatchResults(input: CollectResultsInput): Promise<s
 // ── Soccerdata collection (ESPN + Understat + Sofascore) ──────────────────
 
 async function collectSoccerdata(
-  provider: SoccerdataProvider,
+  provider: HybridProvider,
   homeTeam: string,
   awayTeam: string,
   matchDate: string,
