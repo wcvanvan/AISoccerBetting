@@ -13,6 +13,7 @@ import {
   CORNER_PREDICTION_SYSTEM_PROMPT,
   CORNER_RESULTS_COLLECTION_PROMPT,
   CORNER_REVIEW_SYSTEM_PROMPT,
+  runCornerOdds,
 } from './agent';
 
 runPipeline({
@@ -23,4 +24,6 @@ runPipeline({
   formatOptions: { showCorners: true, oddsLabel: 'Corner' },
   toolName: 'corners',
   marketLabel: 'Corner',
+  runOddsAgent: runCornerOdds,
+  oddsAgentFilename: 'corner-odds.md',
 });

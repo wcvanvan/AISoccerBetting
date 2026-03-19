@@ -9,12 +9,12 @@ import * as fs from 'fs';
 const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 
 import { MatchDataCollector } from './collector';
-import { runMatchNews, runCornerOdds, analyzeReport, PRESENTATION_PREDICTION_SYSTEM_PROMPT, PRESENTATION_REVIEW_SYSTEM_PROMPT } from './agent';
+import { runMatchNews, analyzeReport, PRESENTATION_PREDICTION_SYSTEM_PROMPT, PRESENTATION_REVIEW_SYSTEM_PROMPT } from './agent';
 import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel, resolveSportKeys } from './odds';
 import { OddsEvent } from './odds/types';
 import * as readline from 'readline';
 import { FormatOptions } from './formatter';
-import { SoccerdataProvider } from './provider';
+import { HybridProvider } from './provider';
 import { config } from './config';
 
 // ── Pipeline configuration ──────────────────────────────────────────────────
@@ -34,6 +34,10 @@ export interface PipelineConfig {
   toolName: string;
   /** Market label for display, e.g. "Corner" or "Goal" */
   marketLabel: string;
+  /** Optional function to collect odds via agent. Runs in parallel during collection when ODDS_FETCHING=true. */
+  runOddsAgent?: (homeTeam: string, awayTeam: string, date: string, sportKey: string, eventId: string) => Promise<string>;
+  /** Output filename for agent odds, e.g. 'corner-odds.md' or 'goal-odds.md' */
+  oddsAgentFilename?: string;
 }
 
 function errorMsg(err: unknown): string {
@@ -65,8 +69,8 @@ type OddsArgs = {
   teamB?: string;
 };
 
-type CornerOddsArgs = {
-  mode: 'corner-odds';
+type AgentOddsArgs = {
+  mode: 'agent-odds';
   teamA: string;
   teamB: string;
 };
@@ -81,7 +85,7 @@ type ReviewArgs = {
   matchDir: string;
 };
 
-type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | OddsArgs | CornerOddsArgs | ResultsArgs | ReviewArgs | null;
+type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | OddsArgs | AgentOddsArgs | ResultsArgs | ReviewArgs | null;
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -112,16 +116,16 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
     return { mode: 'news', teamA: teamA.trim(), teamB: teamB.trim() };
   }
 
-  // --corner-odds teamA teamB
-  const cornerOddsIdx = argv.indexOf('--corner-odds');
-  if (cornerOddsIdx !== -1) {
-    const [teamA, teamB] = argv.slice(cornerOddsIdx + 1, cornerOddsIdx + 3);
+  // --agent-odds teamA teamB
+  const agentOddsIdx = argv.indexOf('--agent-odds');
+  if (agentOddsIdx !== -1) {
+    const [teamA, teamB] = argv.slice(agentOddsIdx + 1, agentOddsIdx + 3);
     if (!teamA || !teamB) {
-      console.error('Error: --corner-odds requires two arguments: teamA teamB');
+      console.error('Error: --agent-odds requires two arguments: teamA teamB');
       printUsage(toolName, marketLabel);
       return null;
     }
-    return { mode: 'corner-odds', teamA: teamA.trim(), teamB: teamB.trim() };
+    return { mode: 'agent-odds', teamA: teamA.trim(), teamB: teamB.trim() };
   }
 
   // --odds [teamA teamB]
@@ -184,8 +188,9 @@ Usage:
   npm run ${toolName} "TeamA" "TeamB"             Collect data (date auto-resolved from Odds API)
   npm run ${toolName}:predict <report.md>         Run prediction on existing report → {slug}-prediction.md
   npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
-  npm run ${toolName}:odds "TeamA" "TeamB"        ${toolName === 'corners' ? 'Collect corner odds via agent (API + sportsbooks)' : `Fetch ${marketLabel.toLowerCase()} odds for a match`}${toolName !== 'corners' ? `
-  npm run ${toolName}:odds                        List upcoming events` : ''}
+  npm run ${toolName}:odds "TeamA" "TeamB"        Collect ${marketLabel.toLowerCase()} odds via agent (API + sportsbooks)${toolName !== 'corners' ? `
+  ts-node src/cli-${toolName}.ts --odds "TeamA" "TeamB"   Fetch ${marketLabel.toLowerCase()} odds via API (debug)
+  ts-node src/cli-${toolName}.ts --odds                    List upcoming events` : ''}
   npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + CLI narrative)
   npm run ${toolName}:review <match-dir>          Generate review (compare forecast vs actuals)
 
@@ -453,16 +458,20 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     }
   }
 
-  // ── Standalone corner-odds agent mode ──
-  if (args.mode === 'corner-odds') {
+  // ── Standalone agent-odds mode ──
+  if (args.mode === 'agent-odds') {
+    if (!pipelineConfig.runOddsAgent || !pipelineConfig.oddsAgentFilename) {
+      console.error('Error: odds agent not configured for this market');
+      process.exit(1);
+    }
     const resolved = await resolveEvent(args.teamA, args.teamB, marketConfig);
     console.error(`Resolved: ${resolved.event.home_team} vs ${resolved.event.away_team} — ${resolved.leagueLabel}`);
-    const oddsFilename = path.join(REPORTS_DIR, buildMatchDir(args.teamA, args.teamB, resolved.date), 'corner-odds.md');
+    const oddsFilename = path.join(REPORTS_DIR, buildMatchDir(args.teamA, args.teamB, resolved.date), pipelineConfig.oddsAgentFilename);
     const oddsDir = path.dirname(oddsFilename);
     if (!fs.existsSync(oddsDir)) fs.mkdirSync(oddsDir, { recursive: true });
     try {
-      console.error('Running corner odds agent...');
-      const oddsMarkdown = await runCornerOdds(
+      console.error(`Running ${marketLabel.toLowerCase()} odds agent...`);
+      const oddsMarkdown = await pipelineConfig.runOddsAgent(
         resolved.event.home_team,
         resolved.event.away_team,
         resolved.date,
@@ -470,11 +479,11 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
         resolved.event.id,
       );
       fs.writeFileSync(oddsFilename, oddsMarkdown, 'utf8');
-      console.error(`Corner odds saved → ${oddsFilename}`);
+      console.error(`${marketLabel} odds saved → ${oddsFilename}`);
       process.exit(0);
     } catch (err) {
       const msg = errorMsg(err);
-      console.error(`Corner odds agent failed: ${msg}`);
+      console.error(`${marketLabel} odds agent failed: ${msg}`);
       process.exit(1);
     }
   }
@@ -551,12 +560,12 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
   const resolved = await resolveEvent(args.teamA, args.teamB, marketConfig);
   console.log(`Resolved: ${resolved.event.home_team} vs ${resolved.event.away_team} — ${resolved.leagueLabel} — ${resolved.commenceTime}`);
 
-  const provider = new SoccerdataProvider();
+  const provider = new HybridProvider();
   try {
+    await provider.init();
     const collector = new MatchDataCollector(provider, formatOptions);
 
-    // Run data collection, match news, and corner odds concurrently
-    const isCornerPipeline = toolName === 'corners';
+    // Run data collection, match news, and odds agent concurrently
     const [collectorResult, matchNewsSummary, agentOdds] = await Promise.all([
       collector.collect_data({
         teamA_name: args.teamA,
@@ -565,21 +574,21 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
         eventId: resolved.event.id,
         sportKey: resolved.sportKey,
       }),
-      config.matchNewsFetching
+      config.newsFetching
         ? runMatchNews(args.teamA, args.teamB, resolved.date).catch((err) => {
             console.error(`Match news skipped: ${errorMsg(err)}`);
             return undefined;
           })
         : Promise.resolve(undefined),
-      isCornerPipeline
-        ? runCornerOdds(
+      pipelineConfig.runOddsAgent && config.oddsFetching
+        ? pipelineConfig.runOddsAgent(
             resolved.event.home_team,
             resolved.event.away_team,
             resolved.date,
             resolved.sportKey,
             resolved.event.id,
           ).catch((err) => {
-            console.error(`Corner odds agent skipped: ${errorMsg(err)}`);
+            console.error(`${marketLabel} odds agent skipped: ${errorMsg(err)}`);
             return undefined;
           })
         : Promise.resolve(undefined),

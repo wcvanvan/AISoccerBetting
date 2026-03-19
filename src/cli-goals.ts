@@ -13,6 +13,7 @@ import {
   GOAL_PREDICTION_SYSTEM_PROMPT,
   GOAL_RESULTS_COLLECTION_PROMPT,
   GOAL_REVIEW_SYSTEM_PROMPT,
+  runGoalOdds,
 } from './agent';
 
 runPipeline({
@@ -23,4 +24,6 @@ runPipeline({
   formatOptions: { showCorners: false, oddsLabel: 'Goal' },
   toolName: 'goals',
   marketLabel: 'Goal',
+  runOddsAgent: runGoalOdds,
+  oddsAgentFilename: 'goal-odds.md',
 });
