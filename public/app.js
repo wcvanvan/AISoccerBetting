@@ -32,9 +32,15 @@ function formatKickoff(commenceTime) {
 function showPage(page) {
   document.querySelectorAll('.page').forEach((el) => el.classList.remove('active'));
   document.querySelectorAll('nav a').forEach((el) => el.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
+  const target = document.getElementById('page-' + page);
+  if (target) target.classList.add('active');
   const navLink = document.querySelector('nav a[data-page="' + page + '"]');
   if (navLink) navLink.classList.add('active');
+}
+
+function navigateTo(page) {
+  showPage(page);
+  history.pushState({ page: page }, '');
 }
 
 // ── Events / Matches ────────────────────────────────────────────────────────
@@ -371,15 +377,14 @@ function renderInlineMarketBadges(cell, markets) {
     if (info && (info.hasPrediction || info.hasReview)) {
       hasSome = true;
       const badge = document.createElement('span');
-      let badgeClass = ' cache-full';
       let title = m + ': prediction';
       if (info.hasReview) {
-        badgeClass = ' cache-reviewed';
         title = m + ': reviewed';
       }
-      badge.className = 'cache-badge' + badgeClass;
+      badge.className = 'cache-badge';
+      badge.dataset.market = m;
       badge.title = title;
-      badge.textContent = m.charAt(0).toUpperCase() + m.slice(1);
+      badge.textContent = (info.hasReview ? '\u2713 ' : '') + m.charAt(0).toUpperCase() + m.slice(1);
       cell.appendChild(badge);
     }
   });
@@ -393,7 +398,7 @@ function renderInlineMarketBadges(cell, markets) {
 
 // ── Match Info Page ─────────────────────────────────────────────────────────
 
-function openMatchPage(matchData) {
+function openMatchPage(matchData, skipHistory) {
   const isSameMatch = currentMatch && currentMatch.matchId === matchData.matchId;
 
   if (!isSameMatch) {
@@ -410,6 +415,9 @@ function openMatchPage(matchData) {
   currentMatch = matchData;
   showPage('match');
   renderMatchPage();
+  if (!skipHistory) {
+    history.pushState({ page: 'match', matchId: matchData.matchId }, '');
+  }
 }
 
 function renderMatchPage() {
@@ -425,7 +433,7 @@ function renderMatchPage() {
   back.href = '#';
   back.className = 'back-link';
   back.textContent = '\u2190 Back to matches';
-  back.addEventListener('click', (e) => { e.preventDefault(); showPage('matches'); });
+  back.addEventListener('click', (e) => { e.preventDefault(); history.back(); });
   container.appendChild(back);
 
   // Match info card
@@ -641,10 +649,26 @@ function renderResultTabs(targetEl, marketInfo, loadFn) {
 // ── Init ────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  history.replaceState({ page: 'home' }, '');
+
   document.getElementById('date-prev').addEventListener('click', () => flipDate(-1));
   document.getElementById('date-next').addEventListener('click', () => flipDate(1));
 
   loadEvents();
+
+  // Browser back/forward navigation
+  window.addEventListener('popstate', (e) => {
+    const state = e.state;
+    if (!state || state.page === 'home') {
+      showPage('home');
+    } else if (state.page === 'match' && state.matchId) {
+      const match = eventsData.find(m => m.matchId === state.matchId);
+      if (match) openMatchPage(match, true);
+      else showPage('matches');
+    } else {
+      showPage(state.page);
+    }
+  });
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
@@ -652,7 +676,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') {
       const matchPage = document.getElementById('page-match');
       if (matchPage && matchPage.classList.contains('active')) {
-        showPage('matches');
+        history.back();
       }
     }
     const matchesPage = document.getElementById('page-matches');

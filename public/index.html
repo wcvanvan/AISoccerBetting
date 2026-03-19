@@ -11,15 +11,26 @@
 <body>
   <header>
     <div class="container">
-      <a href="#" class="logo" onclick="showPage('matches')">Soccer Betting<span>AI</span></a>
+      <a href="#" class="logo" onclick="event.preventDefault(); navigateTo('matches')">Soccer Betting<span>AI</span></a>
       <nav></nav>
     </div>
   </header>
 
   <main>
     <div class="container">
+      <!-- Home Page -->
+      <div id="page-home" class="page active">
+        <div class="home-hero">
+          <div class="home-content">
+            <h1 class="home-headline">AI Insights on<br><span class="home-accent">Soccer</span> Betting</h1>
+            <p class="home-desc">Smart analysis of match statistics, historical trends and real-time odds</p>
+            <button class="home-cta" onclick="navigateTo('matches')">View Matches &rarr;</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Matches Page -->
-      <div id="page-matches" class="page active">
+      <div id="page-matches" class="page">
         <div id="date-nav" class="date-nav" style="display:none">
           <button class="date-nav-arrow" id="date-prev">&larr;</button>
           <div class="date-pills" id="date-pills"></div>

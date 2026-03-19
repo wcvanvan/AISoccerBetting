@@ -390,6 +390,7 @@ var CommentsModule = (function() {
         deleteLink.textContent = 'Deleting...';
         deleteComment(fixtureId, market, comment.id)
           .then(function() {
+            // null signals a full refresh after delete (not a reply action)
             if (typeof onReply === 'function') onReply(null);
           })
           .catch(function(e) {
@@ -455,7 +456,7 @@ var CommentsModule = (function() {
 
     var ta = document.createElement('textarea');
     ta.className = 'comment-textarea';
-    ta.placeholder = 'Share your thoughts on this analysis...';
+    ta.placeholder = 'Share your thoughts. You are anonymous.';
     ta.rows = 2;
 
     var actions = el('div', 'comment-input-actions');
@@ -471,7 +472,7 @@ var CommentsModule = (function() {
     function clearReply() {
       replyTarget = null;
       replyIndicator.style.display = 'none';
-      ta.placeholder = 'Share your thoughts on this analysis...';
+      ta.placeholder = 'Share your thoughts. You are anonymous.';
       btn.textContent = 'Post Comment';
     }
 
@@ -589,7 +590,7 @@ var CommentsModule = (function() {
       var comments = data.comments || [];
       var commentVotes = data.commentVotes || {};
       var analysisVotes = data.analysisVotes || { up: 0, down: 0 };
-      var sortMode = 'newest';
+      var sortMode = 'top';
 
       section.textContent = '';
 
@@ -602,8 +603,8 @@ var CommentsModule = (function() {
       var header = el('div', 'comment-section-header');
       var countSpan = el('span', 'comment-count', comments.filter(function(c) { return !c.parentId; }).length + ' Comments');
       var sortWrap = el('div', 'comment-sort');
-      var newestBtn = el('button', 'sort-pill active', 'Newest');
-      var topBtn = el('button', 'sort-pill', 'Top');
+      var topBtn = el('button', 'sort-pill active', 'Top');
+      var newestBtn = el('button', 'sort-pill', 'Newest');
 
       // Comment input (rendered first so reply callbacks can reference it)
       var inputWrap = renderCommentInput(fixtureId, market, refreshAll);
@@ -648,8 +649,8 @@ var CommentsModule = (function() {
         refreshList();
       });
 
-      sortWrap.appendChild(newestBtn);
       sortWrap.appendChild(topBtn);
+      sortWrap.appendChild(newestBtn);
       header.appendChild(countSpan);
       header.appendChild(sortWrap);
       section.appendChild(header);
