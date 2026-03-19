@@ -6,7 +6,7 @@ TypeScript CLI + web dashboard for multi-market soccer betting prediction (corne
 
 **Data collection**:
 
-1. **soccerdata bridge** — Python subprocess merging ESPN (schedule, lineups, corners, goals, cards, shots, fouls) and Understat (xG, npxG, PPDA, deep completions) via the `soccerdata` library.
+1. **HybridProvider** — Composes two data sources: (a) **SofascoreProvider** — TypeScript + Playwright browser client fetches Sofascore API (schedule, lineups, corners, goals, cards, stats) via `page.evaluate(fetch(...))`, bypassing datacenter IP blocks; (b) **UnderstatBridge** — slimmed Python subprocess for Understat-only data (xG, npxG, PPDA, deep completions) via the `soccerdata` library.
 2. **Match news agent** — Claude Code CLI agent with web search fetches absences, injuries, and tactical news.
 3. **Corner odds agent** (corners pipeline only) — Claude Code CLI agent that combines The Odds API, sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.), and third-party comparison sites (sportsgambler.com, etc.).
 4. **Goal odds agent** (goals pipeline) — Claude Code CLI agent that combines The Odds API and sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.) for goal markets (moneyline, totals, spreads, BTTS, double chance).
@@ -27,10 +27,13 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
      +-- Promise.all([
      |     MatchDataCollector (src/collector/match-data-collector.ts)
      |     |  +-- DataProvider interface (src/provider/data-provider.ts)
-     |     |  |    +-- SoccerdataProvider (src/provider/soccerdata-provider.ts)
-     |     |  |         +-- stdin/stdout -> soccerdata_bridge.py
-     |     |  |              +-- sd.ESPN
-     |     |  |              +-- sd.Understat
+     |     |  |    +-- HybridProvider (src/provider/soccerdata-provider.ts)
+     |     |  |         +-- SofascoreProvider (src/provider/sofascore-provider.ts)
+     |     |  |         |    +-- SofascoreClient (src/provider/sofascore-client.ts)
+     |     |  |         |         +-- Playwright Chromium -> Sofascore API
+     |     |  |         +-- UnderstatBridge (src/provider/understat-bridge.ts)
+     |     |  |              +-- stdin/stdout -> soccerdata_bridge.py
+     |     |  |                   +-- sd.Understat
      |     |  +-- MarkdownFormatter (src/formatter/) -> base report
      |     |
      |     runMatchNews (src/agent/match-news-client.ts)
@@ -63,16 +66,19 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 ### Provider layer (src/provider/)
 
 - `DataProvider` — interface: `resolveTeamId()`, `getRecentMatches()`, `getH2HMatches()`, `dispose()`.
-- `SoccerdataProvider` — spawns `python3 scripts/soccerdata_bridge.py`, communicates via JSON lines over stdin/stdout, 300s timeout per call, stderr routed to console for debugging. Also exposes `getTeamSeasonStats()`, `getLeagueContext()`, `getRefereeStats()`, `getLeagueCardContext()` for enrichment data.
+- `HybridProvider` (in `soccerdata-provider.ts`) — composes `SofascoreProvider` + `UnderstatBridge`. Has `async init()` for Playwright browser startup. Exposes `getTeamSeasonStats()`, `getLeagueContext()`, `getSofascoreLineups()`, `getSofascoreMatchStats()`. The old `SoccerdataProvider` name is kept as an alias.
+- `SofascoreProvider` — implements `DataProvider` using Playwright-based `SofascoreClient`. Fetches schedule, stats, incidents, lineups from Sofascore API via browser context.
+- `SofascoreClient` — launches Chromium, navigates to sofascore.com, calls API via `page.evaluate(fetch(...))`. Caches responses to `data/cache/sofascore/*.json`. Rate-limited at 2s intervals.
+- `sofascore-parser.ts` — pure-function module: `TEAM_ALIASES`, `SOFASCORE_TOURNAMENTS`, `STAT_MAP`, `EXTRAS_MAP`, `parseSofascoreStats()`, `parseSofascoreIncidents()`, `parseSofascoreLineups()`, `teamMatches()`.
+- `UnderstatBridge` — spawns `python3 scripts/soccerdata_bridge.py`, JSON-line protocol, 300s timeout. Only handles Understat methods: `getTeamSeasonStats()`, `getLeagueContext()`, `enrichMatches()`, `enrichH2HMatches()`.
 
 ### Python bridge (scripts/soccerdata_bridge.py)
 
-- JSON-line protocol over stdin/stdout. `DataAssembler` merges ESPN + Understat via the `soccerdata` library.
-- **Schedule**: ESPN schedule + scores.
-- **Corners / lineup / formation**: from per-game ESPN Summary JSONs.
-- **xG enrichment**: Understat `read_team_match_stats()`, merged by (date, team).
-- **Card enrichment**: referee stats from ESPN, league-level card context from match results.
-- **Caching**: soccerdata caches HTTP responses in `~/.soccerdata/`. Set `SOCCERDATA_NO_CACHE=1` to force fresh fetches.
+- **Understat-only** (~450 lines). JSON-line protocol over stdin/stdout.
+- **xG enrichment**: Understat `read_team_match_stats()`, merged by (date, team) into match extras.
+- **Season stats**: Understat `read_player_season_stats()`, aggregated per team.
+- **League context**: Understat match-level stats for goals, xG, PPDA, deep, BTTS%, over/under%.
+- **Caching**: soccerdata caches HTTP responses in `~/.soccerdata/`. Sofascore responses cached in `data/cache/sofascore/`.
 
 ### Odds module (src/odds/)
 
