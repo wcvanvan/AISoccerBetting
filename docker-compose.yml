@@ -1,0 +1,35 @@
+services:
+  dev:
+    build:
+      context: .
+      args:
+        UID: ${UID:-501}
+        GID: ${GID:-20}
+    container_name: ai-soccer-dev
+    volumes:
+      # Project source (live editing — changes sync to host)
+      - .:/app
+      # Isolated node_modules (Linux binaries, not macOS)
+      - node_modules:/app/node_modules
+      # Claude Code auth (read-only source, copied on startup to avoid concurrent write corruption)
+      - ${HOME}/.claude:/home/devuser/.claude-host:ro
+      - ${HOME}/.claude.json:/home/devuser/.claude-host.json:ro
+      # ntfy.sh notification topic (create ~/.ntfy-topic on your Mac with your topic name)
+      - ${HOME}/.ntfy-topic:/home/devuser/.ntfy-topic:ro
+      # Persistent Claude data (sessions, memories, project configs)
+      - claude_data:/home/devuser/.claude
+      # Live-reload entrypoint without rebuilding
+      - ./scripts/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+      # SSH keys for git (read-only from host)
+      - ${HOME}/.ssh:/home/devuser/.ssh:ro
+      # soccerdata config + cache
+      - ${HOME}/soccerdata:/home/devuser/soccerdata
+    env_file:
+      - .env
+      - .env.defaults
+    stdin_open: true
+    tty: true
+
+volumes:
+  node_modules:
+  claude_data:

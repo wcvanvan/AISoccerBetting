@@ -4,6 +4,34 @@ Multi-market soccer betting prediction tool with a web dashboard and CLI pipelin
 
 ## Setup
 
+### Docker (recommended)
+
+Docker handles all dependencies (Node.js, Python, Playwright, Claude Code CLI) automatically.
+
+**Prerequisites**: Docker Desktop, an Anthropic API key (logged in via `claude` CLI on your host), and `.env` with your API keys.
+
+```bash
+cp .env.example .env                      # fill in your API keys
+docker compose run --rm dev               # builds image + launches Claude Code
+```
+
+On first run, the image installs Node.js, Python, Playwright Chromium, and Claude Code CLI. Subsequent starts reuse the cached image.
+
+**What's mounted**:
+- Project source is bind-mounted (live editing syncs to host)
+- `~/.claude` auth is synced from host (read-only) so Claude Code is authenticated
+- `~/.ssh` is mounted (read-only) for git operations
+- `~/soccerdata` cache is shared with host
+
+**Usage**:
+- `docker compose run --rm dev` — launches Claude Code (default)
+- `docker compose run --rm dev bash` — opens a shell inside the container
+- `docker compose run --rm dev npm run corners "TeamA" "TeamB" "2026-03-18"` — run any command
+
+**Notifications** (optional): Create `~/.ntfy-topic` on your host with a [ntfy.sh](https://ntfy.sh) topic name to receive push notifications when Claude Code needs input or finishes.
+
+### Native
+
 ```bash
 npm install
 pip install -r scripts/requirements.txt   # Python 3 + soccerdata + pandas

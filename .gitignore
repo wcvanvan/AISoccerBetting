@@ -18,9 +18,4 @@ poisson_calc.py
 .goal-stash/
 .vscode/
 .vercel
-Dockerfile
-.dockerignore
-docker-compose.yml
-scripts/docker-entrypoint.sh
-scripts/docker.sh
 .env*.local
