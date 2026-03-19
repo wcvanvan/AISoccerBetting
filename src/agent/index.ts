@@ -6,8 +6,8 @@ export { CORNER_PREDICTION_SYSTEM_PROMPT } from './prompts/corner-prediction-sys
 export { GOAL_PREDICTION_SYSTEM_PROMPT } from './prompts/goal-prediction-system-prompt';
 export { CARD_PREDICTION_SYSTEM_PROMPT } from './prompts/card-prediction-system-prompt';
 export { MATCH_NEWS_SYSTEM_PROMPT } from './prompts/match-news-system-prompt';
-export { GOAL_ODDS_SYSTEM_PROMPT, buildGoalOddsSystemPrompt } from './prompts/goal-odds-system-prompt';
-export { CORNER_ODDS_SYSTEM_PROMPT, buildCornerOddsSystemPrompt } from './prompts/corner-odds-system-prompt';
+export { buildGoalOddsSystemPrompt } from './prompts/goal-odds-system-prompt';
+export { buildCornerOddsSystemPrompt } from './prompts/corner-odds-system-prompt';
 export {
   CORNER_RESULTS_COLLECTION_PROMPT,
   GOAL_RESULTS_COLLECTION_PROMPT,

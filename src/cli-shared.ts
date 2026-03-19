@@ -188,9 +188,9 @@ Usage:
   npm run ${toolName} "TeamA" "TeamB"             Collect data (date auto-resolved from Odds API)
   npm run ${toolName}:predict <report.md>         Run prediction on existing report → {slug}-prediction.md
   npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
-  npm run ${toolName}:odds "TeamA" "TeamB"        Collect ${marketLabel.toLowerCase()} odds via agent (API + sportsbooks)${toolName !== 'corners' ? `
+  npm run ${toolName}:odds "TeamA" "TeamB"        Collect ${marketLabel.toLowerCase()} odds via agent (API + sportsbooks)
   ts-node src/cli-${toolName}.ts --odds "TeamA" "TeamB"   Fetch ${marketLabel.toLowerCase()} odds via API (debug)
-  ts-node src/cli-${toolName}.ts --odds                    List upcoming events` : ''}
+  ts-node src/cli-${toolName}.ts --odds                    List upcoming events
   npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + CLI narrative)
   npm run ${toolName}:review <match-dir>          Generate review (compare forecast vs actuals)
 

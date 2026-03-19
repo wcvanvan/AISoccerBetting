@@ -3,30 +3,9 @@
  * Instructs Claude to collect corner betting odds from two sources:
  * 1. The Odds API (programmatic)
  * 2. Sportsbook websites via Playwright (DraftKings, FanDuel, etc.)
- *
- * Reads ODDS_BOOKMAKERS / ODDS_REGIONS from env to build the API URL.
  */
 
-function buildApiParams(): string {
-  const bookmakers = process.env.ODDS_BOOKMAKERS?.trim();
-  if (bookmakers) {
-    return `&bookmakers=${bookmakers}`;
-  }
-  const regions = process.env.ODDS_REGIONS?.trim() || 'eu,us';
-  return `&regions=${regions}`;
-}
-
-function buildSportsbookList(): string {
-  const bookmakers = process.env.ODDS_BOOKMAKERS?.trim();
-  if (!bookmakers) return '1. **DraftKings**\n2. **FanDuel**';
-  return bookmakers
-    .split(',')
-    .map((b, i) => {
-      const name = b.trim().replace(/\b\w/g, (c) => c.toUpperCase());
-      return `${i + 1}. **${name}**`;
-    })
-    .join('\n');
-}
+import { buildApiParams, buildSportsbookList } from './odds-prompt-helpers';
 
 export function buildCornerOddsSystemPrompt(): string {
   const apiParams = buildApiParams();
@@ -115,6 +94,3 @@ Appropriate table format for the market type.
 9. **Deduplicate bookmakers** — if the same bookmaker appears in both the API and a sportsbook website, keep only the entry with more data (usually the API). Do NOT list the same bookmaker twice with different odds formats.
 10. **Merge sportsbook data into existing sections** — if a sportsbook provides data for a market that already has its own section (e.g. totals), merge those rows into the existing section table. Only create a separate \`### Market Name — BookmakerName\` subsection for genuinely new market types not covered by the standard sections above.`;
 }
-
-/** @deprecated Use buildCornerOddsSystemPrompt() instead */
-export const CORNER_ODDS_SYSTEM_PROMPT = buildCornerOddsSystemPrompt();
