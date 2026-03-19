@@ -10,7 +10,6 @@ TypeScript CLI + web dashboard for multi-market soccer betting prediction (corne
 2. **Match news agent** — Claude Code CLI agent with web search fetches absences, injuries, and tactical news.
 3. **Corner odds agent** (corners pipeline only) — Claude Code CLI agent that combines The Odds API, sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.), and third-party comparison sites (sportsgambler.com, etc.).
 4. **Goal odds agent** (goals pipeline) — Claude Code CLI agent that combines The Odds API and sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.) for goal markets (moneyline, totals, spreads, BTTS, double chance).
-5. **Odds** (cards pipeline) — The Odds API fetches pre-match markets from configured bookmakers using the Odds API.
 
 **Prediction** — Claude Opus reads the collected report via `claude --print` to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own prediction system prompt.
 
@@ -78,7 +77,7 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 ### Odds module (src/odds/)
 
 - `OddsApiClient` — HTTP wrapper for The Odds API v4 (`getEvents`, `getEventOdds`).
-- `OddsCollector` — finds event by fuzzy team name, fetches markets using configured `MarketConfig` keys. Used by cards pipeline and for event resolution. **Not used by corners/goals pipelines** — their odds are collected by dedicated agents instead.
+- `OddsCollector` — finds event by fuzzy team name. Used for event resolution (finding the correct match + sport key). Odds collection itself is handled by dedicated agents.
 - `MarketConfig` — interface defining market keys and label. `CORNER_MARKET_CONFIG`, `GOAL_MARKET_CONFIG`, and `CARD_MARKET_CONFIG` constants provided.
 
 ### Odds agents (src/agent/)
@@ -156,10 +155,8 @@ npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
 npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
 npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
 
-# Fetch corner odds (via Claude agent: Odds API + sportsbook scraping + 3rd-party sites)
+# Fetch odds via agent (Odds API + sportsbook scraping)
 npm run corners:odds "TeamA" "TeamB"
-
-# Fetch goal odds (via Claude agent: Odds API + sportsbook scraping)
 npm run goals:odds "TeamA" "TeamB"
 
 ```

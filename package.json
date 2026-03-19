@@ -18,7 +18,7 @@
     "cards": "ts-node src/cli-cards.ts",
     "cards:predict": "ts-node src/cli-cards.ts --predict",
     "cards:news": "ts-node src/cli-cards.ts --news",
-    "cards:odds": "ts-node src/cli-cards.ts --odds",
+    "cards:odds": "ts-node src/cli-cards.ts --agent-odds",
     "corners:results": "ts-node src/cli-corners.ts --results",
     "corners:review": "ts-node src/cli-corners.ts --review",
     "goals:results": "ts-node src/cli-goals.ts --results",

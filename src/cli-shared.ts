@@ -10,7 +10,7 @@ const REPORTS_DIR = path.join(__dirname, '..', 'data', 'reports');
 
 import { MatchDataCollector } from './collector';
 import { runMatchNews, analyzeReport, PRESENTATION_PREDICTION_SYSTEM_PROMPT, PRESENTATION_REVIEW_SYSTEM_PROMPT } from './agent';
-import { OddsApiClient, OddsCollector, MarketConfig, getLeagueLabel, resolveSportKeys } from './odds';
+import { OddsCollector, MarketConfig, getLeagueLabel } from './odds';
 import { OddsEvent } from './odds/types';
 import * as readline from 'readline';
 import { FormatOptions } from './formatter';
@@ -63,12 +63,6 @@ type NewsArgs = {
   teamB: string;
 };
 
-type OddsArgs = {
-  mode: 'odds';
-  teamA?: string;
-  teamB?: string;
-};
-
 type AgentOddsArgs = {
   mode: 'agent-odds';
   teamA: string;
@@ -85,7 +79,7 @@ type ReviewArgs = {
   matchDir: string;
 };
 
-type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | OddsArgs | AgentOddsArgs | ResultsArgs | ReviewArgs | null;
+type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | AgentOddsArgs | ResultsArgs | ReviewArgs | null;
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -126,14 +120,6 @@ function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
       return null;
     }
     return { mode: 'agent-odds', teamA: teamA.trim(), teamB: teamB.trim() };
-  }
-
-  // --odds [teamA teamB]
-  const oddsIdx = argv.indexOf('--odds');
-  if (oddsIdx !== -1) {
-    const teamA = argv[oddsIdx + 1]?.trim();
-    const teamB = argv[oddsIdx + 2]?.trim();
-    return { mode: 'odds', teamA: teamA || undefined, teamB: teamB || undefined };
   }
 
   // --results <match-dir>
@@ -189,8 +175,6 @@ Usage:
   npm run ${toolName}:predict <report.md>         Run prediction on existing report → {slug}-prediction.md
   npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
   npm run ${toolName}:odds "TeamA" "TeamB"        Collect ${marketLabel.toLowerCase()} odds via agent (API + sportsbooks)
-  ts-node src/cli-${toolName}.ts --odds "TeamA" "TeamB"   Fetch ${marketLabel.toLowerCase()} odds via API (debug)
-  ts-node src/cli-${toolName}.ts --odds                    List upcoming events
   npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + CLI narrative)
   npm run ${toolName}:review <match-dir>          Generate review (compare forecast vs actuals)
 
@@ -251,62 +235,6 @@ async function runPresentation(
   });
   fs.writeFileSync(outputFilename, presentation, 'utf8');
   console.log(`Presentation saved → ${outputFilename}`);
-}
-
-// ── Odds helpers ────────────────────────────────────────────────────────────
-
-async function showOdds(
-  apiKey: string,
-  teamA: string,
-  teamB: string,
-  marketConfig: MarketConfig,
-): Promise<void> {
-  const collector = new OddsCollector(apiKey, marketConfig);
-  const result = await collector.collectOdds(teamA, teamB);
-
-  if (!result.found) {
-    console.log(`No event found for "${teamA}" vs "${teamB}".`);
-    console.log('Run without team names to list available events.');
-    return;
-  }
-
-  console.log(`\n${result.homeTeam} vs ${result.awayTeam}\n`);
-
-  if (result.markets.length === 0) {
-    console.log(`No ${marketConfig.label.toLowerCase()} markets available yet.`);
-    return;
-  }
-
-  for (const market of result.markets) {
-    console.log(`${market.key}`);
-    const w = { bm: 22, outcome: 16, line: 8 };
-    console.log(`  ${'Bookmaker'.padEnd(w.bm)}${'Outcome'.padEnd(w.outcome)}${'Line'.padEnd(w.line)}Odds`);
-    console.log(`  ${'─'.repeat(w.bm + w.outcome + w.line + 6)}`);
-    for (const bm of market.bookmakers) {
-      for (const o of bm.outcomes) {
-        const line = o.point !== undefined ? String(o.point) : '—';
-        console.log(`  ${bm.name.padEnd(w.bm)}${o.name.padEnd(w.outcome)}${line.padEnd(w.line)}${o.price.toFixed(2)}`);
-      }
-    }
-    console.log();
-  }
-}
-
-async function listOddsEvents(apiKey: string): Promise<void> {
-  const sportKeys = resolveSportKeys();
-  const client = new OddsApiClient(apiKey);
-
-  for (const sportKey of sportKeys) {
-    let events;
-    try { events = await client.getEvents(sportKey); }
-    catch (err) { console.warn(`[skip] ${sportKey}: ${errorMsg(err)}`); continue; }
-    if (events.length === 0) continue;
-
-    console.log(`\n${sportKey}:`);
-    for (const e of events) {
-      console.log(`  ${e.commence_time.slice(0, 10)}  ${e.home_team} vs ${e.away_team}`);
-    }
-  }
 }
 
 // ── Event resolution ─────────────────────────────────────────────────────────
@@ -433,27 +361,6 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     } catch (err) {
       const msg = errorMsg(err);
       console.error(`Match news failed: ${msg}`);
-      process.exit(1);
-    }
-  }
-
-  // ── Standalone odds mode ──
-  if (args.mode === 'odds') {
-    const apiKey = process.env.THE_ODDS_API_KEY?.trim();
-    if (!apiKey) {
-      console.error('Error: THE_ODDS_API_KEY is not set in .env');
-      process.exit(1);
-    }
-    try {
-      if (args.teamA && args.teamB) {
-        await showOdds(apiKey, args.teamA, args.teamB, marketConfig);
-      } else {
-        await listOddsEvents(apiKey);
-      }
-      process.exit(0);
-    } catch (err) {
-      const msg = errorMsg(err);
-      console.error(`Odds lookup failed: ${msg}`);
       process.exit(1);
     }
   }
