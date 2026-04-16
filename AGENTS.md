@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-TypeScript CLI + web dashboard for multi-market soccer betting prediction (corners, goals, cards). Three data pipelines produce a data report, then a prediction agent identifies value bets.
+TypeScript CLI + web dashboard for multi-market soccer betting prediction (corners, goals, cards). Each market has a pre-match flow (data → prediction → presentation) and a post-match flow (results → review → review presentation).
 
 **Data collection**:
 
@@ -13,18 +13,20 @@ TypeScript CLI + web dashboard for multi-market soccer betting prediction (corne
 
 **Prediction** — Claude Opus reads the collected report via `claude --print` to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own prediction system prompt.
 
-**Presentation** — After prediction (or review), a presentation agent rewrites the output into an audience-ready summary. Hides data sources, model internals, and academic hedging; presents picks with authoritative AI-expert tone.
+**Presentation** — After prediction or review, a presentation agent rewrites the output into an audience-ready summary. Hides data sources, model internals, and academic hedging; presents picks with authoritative AI-expert tone.
 
-Output: data report (`{slug}-{market}.md`), prediction (`{slug}-{market}-prediction.md`), presentation (`{slug}-{market}-prediction-presentation.md`), or standalone news (`{slug}-news.md`).
+**Post-match flow** — After kickoff, `:results` re-runs the data provider against the finished match and layers a Claude-generated narrative on top. `:review` scores the original prediction against the actual result and is followed by a review presentation.
+
+Output per match: `{market}.md`, `{market}-prediction.md`, `{market}-prediction-presentation.md`, `{market}-results.md`, `{market}-review.md`, `{market}-review-presentation.md`, plus shared `news.md`, `corner-odds.md` / `goal-odds.md`, and `meta.json`.
 
 ## Architecture
 
 ```
 CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
  |
- +-- runPipeline (src/cli-shared.ts)
+ +-- runPipeline (src/cli-shared.ts) — dispatches on mode flag
      |
-     +-- Promise.all([
+     +-- [default: collect] Promise.all([
      |     MatchDataCollector (src/collector/match-data-collector.ts)
      |     |  +-- DataProvider interface (src/provider/data-provider.ts)
      |     |  |    +-- HybridProvider (src/provider/soccerdata-provider.ts)
@@ -36,22 +38,28 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
      |     |  |                   +-- sd.Understat
      |     |  +-- MarkdownFormatter (src/formatter/) -> base report
      |     |
-     |     runMatchNews (src/agent/match-news-client.ts)
+     |     runMatchNews (src/agent/match-news-client.ts) [if NEWS_FETCHING=true]
      |     |  +-- Claude Code CLI agent with web search -> news markdown
      |     |
-     |     runCornerOdds (src/agent/corner-odds-client.ts) [corners pipeline]
+     |     runCornerOdds (src/agent/corner-odds-client.ts) [if ODDS_FETCHING=true]
      |     |  +-- Claude Code CLI agent -> Odds API + Playwright + 3rd-party -> odds markdown
      |     |
-     |     runGoalOdds (src/agent/goal-odds-client.ts) [goals pipeline]
+     |     runGoalOdds (src/agent/goal-odds-client.ts) [if ODDS_FETCHING=true]
      |        +-- Claude Code CLI agent -> Odds API + Playwright -> odds markdown
      |   ])
      |   -> base report + news section + odds section (string concat)
      |
-     +-- runPrediction (src/cli-shared.ts) [if PREDICTION_ENABLED=true]
-     |    +-- Claude Opus -> {slug}-prediction.md
+     +-- [--predict] runPrediction (src/cli-shared.ts) [also runs inline if PREDICTION_ENABLED=true]
+     |    +-- Claude Opus -> {market}-prediction.md
+     |    +-- runPresentation -> {market}-prediction-presentation.md
      |
-     +-- runPresentation (src/cli-shared.ts) [after prediction or review]
-          +-- Claude Opus (effort: medium) -> {slug}-prediction-presentation.md
+     +-- [--results] collectMatchResults (src/collector/match-results-collector.ts)
+     |    +-- HybridProvider -> structured post-match stats
+     |    +-- Claude CLI narrative agent -> {market}-results.md
+     |
+     +-- [--review] runReview (src/cli-shared.ts)
+          +-- Claude Opus (prediction + results as input) -> {market}-review.md
+          +-- runPresentation -> {market}-review-presentation.md
 
 Web (scripts/build-web.ts -> dist/)
  |
@@ -66,7 +74,7 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 ### Provider layer (src/provider/)
 
 - `DataProvider` — interface: `resolveTeamId()`, `getRecentMatches()`, `getH2HMatches()`, `dispose()`.
-- `HybridProvider` (in `soccerdata-provider.ts`) — composes `SofascoreProvider` + `UnderstatBridge`. Has `async init()` for Playwright browser startup. Exposes `getTeamSeasonStats()`, `getLeagueContext()`, `getSofascoreLineups()`, `getSofascoreMatchStats()`. The old `SoccerdataProvider` name is kept as an alias.
+- `HybridProvider` (in `soccerdata-provider.ts`) — composes `SofascoreProvider` + `UnderstatBridge`. Has `async init()` for Playwright browser startup. Exposes `getTeamSeasonStats()`, `getLeagueContext()`, `getSofascoreLineups()`, `getSofascoreMatchStats()`.
 - `SofascoreProvider` — implements `DataProvider` using Playwright-based `SofascoreClient`. Fetches schedule, stats, incidents, lineups from Sofascore API via browser context.
 - `SofascoreClient` — launches Chromium, navigates to sofascore.com, calls API via `page.evaluate(fetch(...))`. Caches responses to `data/cache/sofascore/*.json`. Rate-limited at 2s intervals.
 - `sofascore-parser.ts` — pure-function module: `TEAM_ALIASES`, `SOFASCORE_TOURNAMENTS`, `STAT_MAP`, `EXTRAS_MAP`, `parseSofascoreStats()`, `parseSofascoreIncidents()`, `parseSofascoreLineups()`, `teamMatches()`.
@@ -97,11 +105,15 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 
 - `report-analyzer.ts` — prediction entry point, shells out to `claude --print`. Uses system prompts from `prompts/`. Accepts optional `model` and `effort` overrides.
 - `claude-cli.ts` — shared helper for running prompts via `claude --print`.
-- `prompts/` — market-specific prediction prompts (corners, goals, cards) and presentation prompts (`presentation-prediction-system-prompt.ts`, `presentation-review-system-prompt.ts`).
+- `prompts/` — market-specific prediction prompts (corners, goals, cards), presentation prompts (`presentation-prediction-system-prompt.ts`, `presentation-review-system-prompt.ts`), and review/results prompts (`review-analysis-system-prompt.ts`, `results-narrative-system-prompt.ts`).
 
 ### Match news agent (src/agent/)
 
 - `match-news-client.ts` — Claude Code CLI agent with web search, collects confirmed absences and tactical news only.
+
+### Post-match collector (src/collector/)
+
+- `match-results-collector.ts` — invoked by `--results`. Re-runs `HybridProvider` against the finished match to capture actual stats, then hands the structured data to a Claude CLI narrative agent (system prompt `results-narrative-system-prompt.ts`) that writes a concise match story. Output: `{market}-results.md`.
 
 ### Web (public/, scripts/build-web.ts)
 
@@ -109,63 +121,53 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 - Build script (`scripts/build-web.ts`) scans `data/reports/` subdirectories, generates `dist/data/manifest.json` with match/market metadata, converts markdown to HTML via `marked`, copies `public/` assets to `dist/`.
 - Vanilla HTML/CSS/JS frontend (no framework), dark theme.
 - Matches page: date-paged view with pill navigation (keyboard left/right), matches grouped by league per date. Auto-lands on today or nearest future date.
-- Match detail: market tabs (goals/corners/cards) with sub-tabs (Value Picks / Full Prediction / Data Report). Value Picks tab uses presentation output when available, falling back to extracted `## Value Picks` section.
+- Match detail: market tabs (goals/corners/cards) with sub-tabs (Value Picks / Full Prediction / Data Report / Review). Value Picks tab uses presentation output when available, falling back to extracted `## Value Picks` section.
 - Reports stored in `data/reports/{matchDir}/` with `meta.json` for league metadata.
 - Deployed to Vercel (`vercel.json` → `outputDirectory: dist`).
-
-## Docker
-
-The project includes a Docker setup for running the full environment (Node.js, Python, Playwright, Claude Code CLI) without native installs.
-
-```bash
-docker compose run --rm dev               # build + launch Claude Code (default)
-docker compose run --rm dev bash          # shell into container
-docker compose run --rm dev npm run corners "TeamA" "TeamB" "2026-03-18"
-```
-
-**Key files**:
-- `Dockerfile` — multi-layer image: Node 20, Python 3, Playwright Chromium, Claude Code CLI, non-root `devuser`
-- `docker-compose.yml` — bind-mounts project source, host `~/.claude` auth (read-only), `~/.ssh` (read-only), `~/soccerdata` cache; uses named volumes for `node_modules` and Claude data persistence
-- `scripts/docker-entrypoint.sh` — syncs Claude auth from host, patches macOS paths for Linux, sets up ntfy.sh notification hooks, installs node deps if needed, launches `claude --dangerously-skip-permissions`
-- `.dockerignore` — excludes `node_modules`, `dist`, `.git`, `.env`, `data/reports`, `data/cache`
-
-**Volumes**: `node_modules` (Linux-native binaries, isolated from host) and `claude_data` (persistent Claude sessions/memories) are Docker-managed named volumes.
-
-**Notifications**: If `~/.ntfy-topic` exists on the host, the entrypoint configures Claude Code hooks to send push notifications via [ntfy.sh](https://ntfy.sh) on `Stop` and `Notification` events.
 
 ## Build & Deploy
 
 ```bash
 npm run web            # build + serve locally at http://localhost:3001
+npm run build          # build only (writes dist/)
 ```
 
-Vercel deployment: `git push` triggers auto-deploy. Vercel runs `vercel-build` → `npm run build`. Config in `vercel.json` (outputDirectory: `dist`, SPA fallback to `index.html`).
-
-To deploy manually: `vercel --prod --token $VERCEL_TOKEN` (token is in `.env`).
+Vercel deployment: `git push` to the deploy branch triggers auto-deploy. Vercel runs `vercel-build` → `npm run build`. Config in `vercel.json` (outputDirectory: `dist`, SPA fallback to `index.html`).
 
 ## CLI Commands
 
+Match date is auto-resolved via the Odds API when running the full pipeline, so only team names are required.
+
 ```bash
-# Full pipeline (collect data + generate report)
-npm run corners "TeamA" "TeamB" "YYYY-MM-DD"
-npm run goals "TeamA" "TeamB" "YYYY-MM-DD"
-npm run cards "TeamA" "TeamB" "YYYY-MM-DD"
+# Full pipeline (collect data + generate report, optionally run prediction inline)
+npm run corners "TeamA" "TeamB"
+npm run goals "TeamA" "TeamB"
+npm run cards "TeamA" "TeamB"
 
 # Run prediction on an existing report
 npm run corners:predict <report.md>
 npm run goals:predict <report.md>
 npm run cards:predict <report.md>
 
-# Fetch match news
-npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
-npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
-npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
+# Fetch match news standalone
+npm run corners:news "TeamA" "TeamB"
+npm run goals:news "TeamA" "TeamB"
+npm run cards:news "TeamA" "TeamB"
 
 # Fetch odds via agent (Odds API + sportsbook scraping)
 npm run corners:odds "TeamA" "TeamB"
 npm run goals:odds "TeamA" "TeamB"
 
+# Post-match: collect results, then review prediction vs actuals
+npm run corners:results <match-dir>
+npm run corners:review  <match-dir>
+npm run goals:results   <match-dir>
+npm run goals:review    <match-dir>
+npm run cards:results   <match-dir>
+npm run cards:review    <match-dir>
 ```
+
+`<match-dir>` is the folder name under `data/reports/`, e.g. `arsenal-vs-chelsea-2026-04-20`.
 
 ## Key Environment Variables
 
@@ -173,13 +175,13 @@ Secrets go in `.env` (git-ignored). Non-secret defaults live in `.env.defaults` 
 
 | Variable | Purpose |
 |----------|---------|
-| `THE_ODDS_API_KEY` | Betting odds (required for odds fetching) |
-| `VERCEL_TOKEN` | Vercel deploy token (for manual deploys) |
-| `NEWS_FETCHING` | When `true`, news collection is integrated into data pipelines. Otherwise news must be fetched separately via `:news` commands. |
-| `ODDS_FETCHING` | When `true`, odds agent runs during data pipelines (corners and goals). Otherwise odds must be fetched separately. |
+| `THE_ODDS_API_KEY` | Betting odds (required for odds fetching and match-date resolution) |
+| `NEWS_FETCHING` | When `true`, news agent runs inline during the data pipeline. Otherwise use `:news`. |
+| `ODDS_FETCHING` | When `true`, odds agent runs inline during the data pipeline (corners and goals). Otherwise use `:odds`. |
 | `PREDICTION_ENABLED` | When `true`, prediction runs automatically after data collection |
-| `PREDICTION_MODEL` | Claude model for prediction (default: claude-opus-4-6) |
-| `PRESENTATION_MODEL` | Claude model for presentation rewrites (default: claude-opus-4-6) |
+| `PREDICTION_MODEL` | Claude model for prediction (default: `claude-opus-4-6`) |
+| `PRESENTATION_MODEL` | Claude model for presentation rewrites (default: `claude-opus-4-6`) |
+| `WEB_SEARCH_MODEL` | Claude model for the news web-search agent (default: `claude-opus-4-6`) |
 
 ## Output files
 
@@ -190,11 +192,11 @@ All outputs live under `data/reports/{teamA}-vs-{teamB}-{date}/`.
 | `meta.json` | JSON | Match metadata (teams, kickoff, league) |
 | `{market}.md` | Compact, structured | Data report for downstream agents |
 | `{market}-prediction.md` | Human-readable markdown | Opus betting prediction |
+| `{market}-prediction-presentation.md` | Markdown | Audience-ready prediction summary (hides methodology) |
 | `news.md` | Plain text with source URLs | Match news (absences, injuries) |
 | `corner-odds.md` | Markdown tables | Corner odds from Odds API + sportsbook scraping |
 | `goal-odds.md` | Markdown tables | Goal odds from Odds API + sportsbook scraping |
-| `{market}-prediction-presentation.md` | Markdown | Audience-ready prediction summary (hides methodology) |
-| `{market}-results.md` | Markdown | Post-game results (soccerdata + narrative) |
+| `{market}-results.md` | Markdown | Post-game results (provider data + narrative) |
 | `{market}-review.md` | Markdown | Review comparing prediction vs actuals |
 | `{market}-review-presentation.md` | Markdown | Audience-ready review summary (hides methodology) |
 

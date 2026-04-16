@@ -14,17 +14,21 @@ function envBool(key: string): boolean {
 }
 
 export const config = {
-  get matchNewsFetching(): boolean {
-    return envBool('MATCH_NEWS_FETCHING');
+  get newsFetching(): boolean {
+    return envBool('NEWS_FETCHING');
+  },
+
+  get oddsFetching(): boolean {
+    return envBool('ODDS_FETCHING');
   },
 
   get predictionEnabled(): boolean {
-    return envBool('PREDICTION_ENABLED') || envBool('ANALYSIS_ENABLED');
+    return envBool('PREDICTION_ENABLED');
   },
 
   prediction: {
     get model(): string {
-      return optionalEnv('PREDICTION_MODEL') ?? optionalEnv('ANALYSIS_MODEL') ?? 'claude-opus-4-6';
+      return optionalEnv('PREDICTION_MODEL') ?? 'claude-opus-4-6';
     },
   },
 

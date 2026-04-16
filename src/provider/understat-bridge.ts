@@ -7,8 +7,6 @@
  * - get_league_context
  * - enrich_matches (xG enrichment)
  * - enrich_h2h_matches (xG enrichment for H2H)
- *
- * Reuses the same subprocess management pattern as the original SoccerdataProvider.
  */
 
 import { spawn, ChildProcess } from 'child_process';

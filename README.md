@@ -47,21 +47,23 @@ You also need [Claude Code CLI](https://claude.ai/code) installed and authentica
 
 ## CLI usage
 
+The match date is auto-resolved from the Odds API, so you only pass the two team names for collection. Post-game commands take a match directory name (e.g. `arsenal-vs-chelsea-2026-04-20`).
+
 ```bash
 # Full pipeline: collect data + generate report
-npm run corners "Arsenal" "Chelsea" "2026-04-20"
-npm run goals   "Arsenal" "Chelsea" "2026-04-20"
-npm run cards   "Arsenal" "Chelsea" "2026-04-20"
+npm run corners "Arsenal" "Chelsea"
+npm run goals   "Arsenal" "Chelsea"
+npm run cards   "Arsenal" "Chelsea"
 
 # Run prediction on an existing report
 npm run corners:predict data/reports/arsenal-vs-chelsea-2026-04-20/corners.md
 
 # Collect post-game results and review prediction accuracy
-npm run corners:results "Arsenal" "Chelsea" "2026-04-20"
-npm run corners:review  data/reports/arsenal-vs-chelsea-2026-04-20/corners.md
+npm run corners:results arsenal-vs-chelsea-2026-04-20
+npm run corners:review  arsenal-vs-chelsea-2026-04-20
 
 # Fetch match news separately
-npm run corners:news "Arsenal" "Chelsea" "2026-04-20"
+npm run corners:news "Arsenal" "Chelsea"
 
 # Fetch odds separately
 npm run corners:odds "Arsenal" "Chelsea"

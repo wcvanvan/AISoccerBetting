@@ -1,12 +1,9 @@
 /**
  * HybridProvider — DataProvider composing SofascoreProvider (Playwright) +
- * UnderstatBridge (Python subprocess) to replace the old monolithic
- * SoccerdataProvider.
+ * UnderstatBridge (Python subprocess).
  *
  * Sofascore data is fetched via Playwright (bypasses 403 from datacenter IPs).
  * Understat data is fetched via the slimmed-down Python bridge.
- *
- * The old SoccerdataProvider class name is kept as an alias for backward compat.
  */
 
 import { DataProvider } from './data-provider';
@@ -166,8 +163,3 @@ export class HybridProvider implements DataProvider {
     this.understat.dispose();
   }
 }
-
-/** @deprecated Use HybridProvider instead. Kept for backward compatibility. */
-export const SoccerdataProvider = HybridProvider;
-/** @deprecated Use HybridProvider instead. */
-export type SoccerdataProvider = HybridProvider;

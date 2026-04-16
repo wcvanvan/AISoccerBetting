@@ -1,9 +1,7 @@
 {
   "name": "soccer-betting-analyzer",
   "version": "2.0.0",
-  "description": "Multi-source soccer data collection and betting analysis (soccerdata + Claude)",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "description": "Soccer betting prediction pipeline — collects match data, fetches live odds, and uses Claude to produce structured value picks with post-game reviews",
   "scripts": {
     "build": "ts-node scripts/build-web.ts",
     "start": "ts-node src/cli-corners.ts",
@@ -31,7 +29,7 @@
   "keywords": [
     "soccer",
     "betting",
-    "soccerdata",
+    "claude",
     "corners",
     "goals",
     "cards",
