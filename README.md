@@ -1,4 +1,4 @@
-# SoccerBetting Agent
+# Soccer Betting Agent
 
 An soccer betting agent that collects match data from multiple sources, fetches live odds, and uses Claude to produce structured betting predictions with value picks. After the match, it collects results and generates a post-game review comparing predictions against actual outcomes.
 
