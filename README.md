@@ -1,36 +1,38 @@
-# AISoccerBetting
+# SoccerBetting Agent
 
-Multi-market soccer betting prediction tool with a web dashboard and CLI pipelines. Collects match data from ESPN and Understat, fetches betting odds, and runs AI-powered predictions via Claude.
+An soccer betting agent that collects match data from multiple sources, fetches live odds, and uses Claude to produce structured betting predictions with value picks. After the match, it collects results and generates a post-game review comparing predictions against actual outcomes.
+
+## What it does
+
+Given two teams and a match date, the tool:
+
+1. **Collects match data** — recent form, head-to-head history, lineups, corners, goals, cards, shots, fouls, xG
+2. **Fetches live odds** — scrapes DraftKings, FanDuel, and other sportsbooks, plus The Odds API
+3. **Gathers match news** — an AI agent with web search collects confirmed absences, injuries, and tactical updates
+4. **Generates a prediction** — Claude Opus identifies value bets by comparing statistical models against sportsbook lines
+5. **Writes a presentation** — a second agent rewrites the output into an audience-ready summary with authoritative picks
+6. **Collects post-game results** — after the match, fetches actual results and generates a narrative summary
+7. **Reviews the prediction** — compares predicted picks against actual outcomes, scoring accuracy and surfacing what was right or wrong
+
+Supports three markets: **corners**, **goals**, and **cards**.
+
+## Tech stack
+
+- **TypeScript** — CLI pipelines and web build
+- **Python** — Understat xG data via `soccerdata` library
+- **Playwright** — headless Chromium for Sofascore data access and sportsbook scraping
+- **Claude** — Opus for prediction, presentation, and review; Sonnet for news
+- **Vercel** — static site hosting with auto-deploy on push
+- **The Odds API** — pre-match betting odds
+
+## Data sources
+
+- **Sofascore** — match schedule, lineups, corners, goals, cards, shots, fouls, stats
+- **Understat** — xG, npxG, PPDA, deep completions (big-5 European leagues)
+- **The Odds API** — pre-match betting odds
+- **Sportsbook websites** — DraftKings, FanDuel, and others (scraped via Playwright)
 
 ## Setup
-
-### Docker (recommended)
-
-Docker handles all dependencies (Node.js, Python, Playwright, Claude Code CLI) automatically.
-
-**Prerequisites**: Docker Desktop, an Anthropic API key (logged in via `claude` CLI on your host), and `.env` with your API keys.
-
-```bash
-cp .env.example .env                      # fill in your API keys
-docker compose run --rm dev               # builds image + launches Claude Code
-```
-
-On first run, the image installs Node.js, Python, Playwright Chromium, and Claude Code CLI. Subsequent starts reuse the cached image.
-
-**What's mounted**:
-- Project source is bind-mounted (live editing syncs to host)
-- `~/.claude` auth is synced from host (read-only) so Claude Code is authenticated
-- `~/.ssh` is mounted (read-only) for git operations
-- `~/soccerdata` cache is shared with host
-
-**Usage**:
-- `docker compose run --rm dev` — launches Claude Code (default)
-- `docker compose run --rm dev bash` — opens a shell inside the container
-- `docker compose run --rm dev npm run corners "TeamA" "TeamB" "2026-03-18"` — run any command
-
-**Notifications** (optional): Create `~/.ntfy-topic` on your host with a [ntfy.sh](https://ntfy.sh) topic name to receive push notifications when Claude Code needs input or finishes.
-
-### Native
 
 ```bash
 npm install
@@ -38,8 +40,33 @@ pip install -r scripts/requirements.txt   # Python 3 + soccerdata + pandas
 cp .env.example .env                      # fill in your API keys
 ```
 
-Required keys in `.env`:
-- `THE_ODDS_API_KEY` — [the-odds-api.com](https://the-odds-api.com) (for odds markets)
+Required key in `.env`:
+- `THE_ODDS_API_KEY` — [the-odds-api.com](https://the-odds-api.com)
+
+You also need [Claude Code CLI](https://claude.ai/code) installed and authenticated (`claude login`).
+
+## CLI usage
+
+```bash
+# Full pipeline: collect data + generate report
+npm run corners "Arsenal" "Chelsea" "2026-04-20"
+npm run goals   "Arsenal" "Chelsea" "2026-04-20"
+npm run cards   "Arsenal" "Chelsea" "2026-04-20"
+
+# Run prediction on an existing report
+npm run corners:predict data/reports/arsenal-vs-chelsea-2026-04-20/corners.md
+
+# Collect post-game results and review prediction accuracy
+npm run corners:results "Arsenal" "Chelsea" "2026-04-20"
+npm run corners:review  data/reports/arsenal-vs-chelsea-2026-04-20/corners.md
+
+# Fetch match news separately
+npm run corners:news "Arsenal" "Chelsea" "2026-04-20"
+
+# Fetch odds separately
+npm run corners:odds "Arsenal" "Chelsea"
+npm run goals:odds   "Arsenal" "Chelsea"
+```
 
 ## Web UI
 
@@ -47,73 +74,32 @@ Required keys in `.env`:
 npm run web      # build + serve locally at http://localhost:3001
 ```
 
-Displays pre-generated prediction reports. No server or authentication — just HTML files built from the markdown reports in `data/reports/`.
+Scans `data/reports/`, converts markdown to HTML, and serves a date-paged match dashboard with tabs for predictions, data reports, and post-game reviews. Deployed to Vercel automatically on `git push`.
 
-Deployed to Vercel automatically via `git push` (runs `vercel-build` → `npm run build`).
+## Output files
 
-## CLI Commands
+All outputs are written to `data/reports/{team-a}-vs-{team-b}-{date}/`.
 
-The CLI is useful for scripting, automation, or when you prefer the terminal.
+| File | Purpose |
+|------|---------|
+| `{market}.md` | Structured data report |
+| `{market}-prediction.md` | Claude Opus betting prediction |
+| `{market}-prediction-presentation.md` | Audience-ready value picks summary |
+| `news.md` | Confirmed absences, injuries, tactical notes |
+| `corner-odds.md` / `goal-odds.md` | Scraped odds from sportsbooks |
+| `{market}-results.md` | Post-game results with narrative summary |
+| `{market}-review.md` | Prediction vs actuals accuracy review |
+| `{market}-review-presentation.md` | Audience-ready review summary |
 
-### Collect data + generate report
-
-```bash
-npm run corners "TeamA" "TeamB" "YYYY-MM-DD"
-npm run goals "TeamA" "TeamB" "YYYY-MM-DD"
-npm run cards "TeamA" "TeamB" "YYYY-MM-DD"
-```
-
-Runs soccerdata collection + odds. Writes `{slug}-{market}.md`.
-
-### Run prediction on an existing report
-
-```bash
-npm run goals:predict <report.md>
-npm run corners:predict <report.md>
-npm run cards:predict <report.md>
-```
-
-Reads an existing report and runs Claude Opus prediction. Writes `{slug}-{market}-prediction.md` and `{slug}-{market}-prediction-presentation.md` (audience-ready summary).
-
-Prediction and news collection use the Claude Code CLI (`claude --print`) — no Anthropic API key required.
-
-### Fetch match news
-
-```bash
-npm run corners:news "TeamA" "TeamB" "YYYY-MM-DD"
-npm run goals:news "TeamA" "TeamB" "YYYY-MM-DD"
-npm run cards:news "TeamA" "TeamB" "YYYY-MM-DD"
-```
-
-Runs the Claude Code CLI news agent (absences, injuries, lineups). Writes `{slug}-news.md`.
-
-### Fetch odds
-
-```bash
-npm run corners:odds "TeamA" "TeamB"         # corner odds via Claude agent (API + sportsbooks + 3rd-party)
-npm run goals:odds "TeamA" "TeamB"            # goal odds from The Odds API
-npm run goals:odds                            # list upcoming events
-```
-
-Corner odds are collected by a Claude Code CLI agent that combines The Odds API, sportsbook website scraping (DraftKings, FanDuel, etc. via Playwright), and third-party comparison sites (sportsgambler.com, etc.). Goal and card odds use The Odds API directly for now (will be migrated in the future).
-
-Configure bookmakers via `ODDS_BOOKMAKERS` and leagues via `ODDS_SPORT_KEYS` in `.env.defaults`.
-
-## Data Sources
-
-- **ESPN** (via soccerdata) — match results, lineups, corners, goals, cards, shots, fouls
-- **Understat** (via soccerdata) — xG, npxG, PPDA, deep completions (big-5 European leagues only)
-- **The Odds API** — pre-match betting odds
-
-## Environment
-
-Non-secret defaults live in `.env.defaults` (committed). Secrets go in `.env` (git-ignored).
+## Environment variables
 
 | Variable | Purpose |
 |----------|---------|
-| `THE_ODDS_API_KEY` | Betting odds (required for odds) |
-| `PREDICTION_MODEL` | Claude model for prediction (default: claude-opus-4-6) |
-| `PRESENTATION_MODEL` | Claude model for presentation rewrites (default: claude-opus-4-6) |
-| `WEB_SEARCH_MODEL` | Claude model for news (default: claude-opus-4-6) |
+| `THE_ODDS_API_KEY` | Betting odds (required) |
+| `PREDICTION_ENABLED` | Auto-run prediction after data collection |
+| `NEWS_FETCHING` | Integrate news into the pipeline |
+| `ODDS_FETCHING` | Integrate odds into the pipeline |
+| `PREDICTION_MODEL` | Claude model for prediction (default: `claude-opus-4-6`) |
+| `PRESENTATION_MODEL` | Claude model for presentation (default: `claude-opus-4-6`) |
 
 See `.env.defaults` for all configurable options.
