@@ -1,9 +1,15 @@
 /**
  * sofascore-client — Playwright browser wrapper for Sofascore API access.
  *
- * Sofascore blocks datacenter IPs at the API level, but serves the same JSON
+ * Sofascore blocks datacenter IPs at the API level but serves the same JSON
  * to browsers visiting sofascore.com. This client launches Chromium, navigates
- * to sofascore.com once, then calls the API via `page.evaluate(fetch(...))`.
+ * to sofascore.com once to seed cookies, then calls the API via
+ * `page.evaluate(fetch(...))`.
+ *
+ * Uses per-team endpoints (`team/{id}/events/last/*`) + the dedicated H2H
+ * endpoint (`event/{customId}/h2h/events`). A full Chelsea-vs-ManU pre-game
+ * collection makes ~4 index calls (2 × search, 2 × last-events) plus the H2H
+ * call plus ~3 enrichment calls per match — cold-cache ≈ 2 min, warm ≈ instant.
  *
  * Responses are cached to `data/cache/sofascore/` to avoid redundant requests.
  */
@@ -13,21 +19,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { RateLimiter } from '../utils/rate-limiter';
 import {
-  SOFASCORE_TOURNAMENTS,
-  DEFAULT_LEAGUES,
   SofascoreEvent,
+  SofascoreSearchResult,
   SofascoreStatisticsResponse,
   SofascoreIncidentsResponse,
   SofascoreLineupsResponse,
 } from './sofascore-parser';
 
 const CACHE_DIR = path.resolve(__dirname, '../../data/cache/sofascore');
-const RATE_LIMIT_MS = 2000; // conservative — IP may already be flagged
+const RATE_LIMIT_MS = 600; // ~1.6 req/s — conservative browser-session cadence
 
 export class SofascoreClient {
   private browser: Browser | null = null;
   private page: Page | null = null;
   private limiter = new RateLimiter(RATE_LIMIT_MS);
+  private inFlight = new Map<string, Promise<unknown>>();
 
   /** Launch browser and navigate to sofascore.com to establish cookies/session. */
   async init(): Promise<void> {
@@ -38,7 +44,6 @@ export class SofascoreClient {
     });
     this.page = await context.newPage();
     await this.page.goto('https://www.sofascore.com', { waitUntil: 'domcontentloaded' });
-    // Ensure cache directory exists
     if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
   }
 
@@ -53,18 +58,33 @@ export class SofascoreClient {
 
   // ── Generic fetch ─────────────────────────────────────────────────────────
 
-  /** Fetch JSON from the Sofascore API via the browser, with disk caching. */
+  /**
+   * Fetch JSON from the Sofascore API via the browser, with disk caching and
+   * per-URL in-flight deduplication so concurrent callers share the same
+   * network round-trip.
+   */
   async fetchJson<T>(apiPath: string, cacheKey: string): Promise<T | null> {
-    // Check disk cache first
     const cachePath = path.join(CACHE_DIR, `${cacheKey}.json`);
     if (fs.existsSync(cachePath)) {
       try {
         return JSON.parse(fs.readFileSync(cachePath, 'utf8')) as T;
       } catch {
-        // Cache corrupt — refetch
+        // cache corrupt — refetch
       }
     }
 
+    // Dedupe concurrent callers for the same cache key
+    const existing = this.inFlight.get(cacheKey);
+    if (existing) return existing as Promise<T | null>;
+
+    const task = this.fetchFresh<T>(apiPath, cachePath).finally(() => {
+      this.inFlight.delete(cacheKey);
+    });
+    this.inFlight.set(cacheKey, task);
+    return task;
+  }
+
+  private async fetchFresh<T>(apiPath: string, cachePath: string): Promise<T | null> {
     if (!this.page) throw new Error('SofascoreClient not initialized — call init() first');
 
     const url = `https://api.sofascore.com/api/v1/${apiPath}`;
@@ -85,28 +105,60 @@ export class SofascoreClient {
       return null;
     }
 
-    // Write to cache
     try {
       fs.writeFileSync(cachePath, JSON.stringify(result, null, 2), 'utf8');
     } catch {
-      // Cache write failure is non-fatal
+      // non-fatal
     }
-
     return result as T;
   }
 
   // ── Typed API methods ─────────────────────────────────────────────────────
 
-  /** Get seasons for a tournament. */
-  async getSeasons(tournamentId: number): Promise<{ id: number; year: string }[]> {
-    const data = await this.fetchJson<{ seasons?: Array<{ id: number; year: string }> }>(
-      `unique-tournament/${tournamentId}/seasons`,
-      `Seasons_${tournamentId}`,
+  /** Search for a team by name. */
+  async searchTeams(query: string): Promise<SofascoreSearchResult[]> {
+    const safeKey = query.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase();
+    const data = await this.fetchJson<{ results?: SofascoreSearchResult[] }>(
+      `search/all?q=${encodeURIComponent(query)}&type=team`,
+      `SearchTeam_${safeKey}`,
     );
-    return data?.seasons ?? [];
+    return (data?.results ?? []).filter(r => r.type === 'team');
   }
 
-  /** Get scheduled events for a specific date. */
+  /** Most recent completed matches for a team (page 0 = most recent batch). */
+  async getTeamEventsLast(
+    teamId: number,
+    page: number,
+  ): Promise<{ events: SofascoreEvent[]; hasNextPage: boolean }> {
+    const data = await this.fetchJson<{ events?: SofascoreEvent[]; hasNextPage?: boolean }>(
+      `team/${teamId}/events/last/${page}`,
+      `TeamEventsLast_${teamId}_${page}`,
+    );
+    return { events: data?.events ?? [], hasNextPage: data?.hasNextPage ?? false };
+  }
+
+  /** Upcoming matches for a team — useful for discovering the customId of a pending H2H. */
+  async getTeamEventsNext(
+    teamId: number,
+    page: number,
+  ): Promise<{ events: SofascoreEvent[]; hasNextPage: boolean }> {
+    const data = await this.fetchJson<{ events?: SofascoreEvent[]; hasNextPage?: boolean }>(
+      `team/${teamId}/events/next/${page}`,
+      `TeamEventsNext_${teamId}_${page}`,
+    );
+    return { events: data?.events ?? [], hasNextPage: data?.hasNextPage ?? false };
+  }
+
+  /** Full H2H match list between the two teams of any event sharing a customId. */
+  async getH2HEvents(customId: string): Promise<SofascoreEvent[]> {
+    const data = await this.fetchJson<{ events?: SofascoreEvent[] }>(
+      `event/${customId}/h2h/events`,
+      `H2HEvents_${customId}`,
+    );
+    return data?.events ?? [];
+  }
+
+  /** Scheduled events for a single date (used by match-specific lookups). */
   async getScheduledEvents(date: string): Promise<SofascoreEvent[]> {
     const data = await this.fetchJson<{ events?: SofascoreEvent[] }>(
       `sport/football/scheduled-events/${date}`,
@@ -115,23 +167,7 @@ export class SofascoreClient {
     return data?.events ?? [];
   }
 
-  /** Get completed events for a tournament season (paginated, most recent first). */
-  async getSeasonEventsPage(
-    tournamentId: number,
-    seasonId: number,
-    page: number,
-  ): Promise<{ events: SofascoreEvent[]; hasNextPage: boolean }> {
-    const data = await this.fetchJson<{ events?: SofascoreEvent[]; hasNextPage?: boolean }>(
-      `unique-tournament/${tournamentId}/season/${seasonId}/events/last/${page}`,
-      `SeasonEvents_${tournamentId}_${seasonId}_last_${page}`,
-    );
-    return {
-      events: data?.events ?? [],
-      hasNextPage: data?.hasNextPage ?? false,
-    };
-  }
-
-  /** Get match statistics. */
+  /** Match statistics by event ID. */
   async getEventStatistics(gameId: number): Promise<SofascoreStatisticsResponse | null> {
     return this.fetchJson<SofascoreStatisticsResponse>(
       `event/${gameId}/statistics`,
@@ -139,7 +175,7 @@ export class SofascoreClient {
     );
   }
 
-  /** Get match incidents (goals, cards, subs). */
+  /** Match incidents (goals, cards, subs) by event ID. */
   async getEventIncidents(gameId: number): Promise<SofascoreIncidentsResponse | null> {
     return this.fetchJson<SofascoreIncidentsResponse>(
       `event/${gameId}/incidents`,
@@ -147,71 +183,11 @@ export class SofascoreClient {
     );
   }
 
-  /** Get match lineups. */
+  /** Match lineups by event ID. */
   async getEventLineups(gameId: number): Promise<SofascoreLineupsResponse | null> {
     return this.fetchJson<SofascoreLineupsResponse>(
       `event/${gameId}/lineups`,
       `EventLineups_${gameId}`,
     );
-  }
-
-  // ── Schedule building ─────────────────────────────────────────────────────
-
-  /** Fetch full schedule across all configured leagues + seasons. */
-  async getFullSchedule(leagues?: string[]): Promise<import('./sofascore-parser').ScheduleRow[]> {
-    const leaguesToScan = leagues ?? DEFAULT_LEAGUES;
-    const now = new Date();
-    const year = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
-    const seasons = [String(year), String(year - 1)];
-    const rows: import('./sofascore-parser').ScheduleRow[] = [];
-
-    for (const league of leaguesToScan) {
-      const tid = SOFASCORE_TOURNAMENTS[league];
-      if (!tid) continue;
-
-      // Get the current season ID
-      const seasonList = await this.getSeasons(tid);
-      if (seasonList.length === 0) continue;
-
-      // Use the first (most recent) season
-      const seasonId = seasonList[0].id;
-
-      // Fetch up to 3 pages (90 events)
-      const seenIds = new Set<number>();
-      for (let page = 0; page < 3; page++) {
-        const { events, hasNextPage } = await this.getSeasonEventsPage(tid, seasonId, page);
-        if (events.length === 0) break;
-
-        for (const ev of events) {
-          if (seenIds.has(ev.id)) continue;
-          seenIds.add(ev.id);
-
-          const homeScore = ev.homeScore?.current;
-          const awayScore = ev.awayScore?.current;
-          if (homeScore == null || awayScore == null) continue;
-
-          let dateStr = '';
-          if (ev.startTimestamp) {
-            dateStr = new Date(ev.startTimestamp * 1000).toISOString().slice(0, 10);
-          }
-
-          rows.push({
-            date: dateStr,
-            homeTeam: ev.homeTeam?.name ?? '',
-            awayTeam: ev.awayTeam?.name ?? '',
-            homeScore,
-            awayScore,
-            league,
-            gameId: ev.id,
-          });
-        }
-
-        if (!hasNextPage) break;
-      }
-    }
-
-    // Sort by date descending
-    rows.sort((a, b) => b.date.localeCompare(a.date));
-    return rows;
   }
 }

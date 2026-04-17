@@ -1,8 +1,8 @@
 /**
  * sofascore-parser — pure-function parsing module for Sofascore API responses.
  *
- * Ported from the Python soccerdata_bridge.py: stat_map, extras_map,
- * TEAM_ALIASES, SOFASCORE_TOURNAMENTS, and all parsing helpers.
+ * Holds team-name aliases, stat/extras maps, and the builders that convert
+ * Sofascore events into this project's `MatchDetails` / `H2HMatch` records.
  */
 
 import {
@@ -59,41 +59,31 @@ const SOFASCORE_ALIASES: Record<string, string> = {
   hammers: 'west ham',
 };
 
-/** Sofascore unique tournament IDs for direct API access. */
-export const SOFASCORE_TOURNAMENTS: Record<string, number> = {
-  'ENG-Premier League': 17,
-  'ESP-La Liga': 8,
-  'GER-Bundesliga': 35,
-  'ITA-Serie A': 23,
-  'FRA-Ligue 1': 34,
-  'INT-Champions League': 7,
-  'INT-Europa League': 679,
-  'INT-Conference League': 17015,
-  'ENG-FA Cup': 19,
-  'ENG-League Cup': 21,
-  'ESP-Copa del Rey': 329,
-  'ITA-Coppa Italia': 328,
-  'FRA-Coupe de France': 335,
-  'ESP-Supercopa de Espana': 213,
+/**
+ * Map from country alpha-3 code → league-label prefix used in reports.
+ * Matches the legacy "ENG-Premier League" format produced by soccerdata.
+ * Unknown / international competitions fall through to "INT".
+ */
+const COUNTRY_PREFIX: Record<string, string> = {
+  ENG: 'ENG',
+  ESP: 'ESP',
+  GER: 'GER',
+  ITA: 'ITA',
+  FRA: 'FRA',
+  NED: 'NED',
+  POR: 'POR',
+  TUR: 'TUR',
+  BEL: 'BEL',
+  SCO: 'SCO',
 };
 
-/** Default leagues to scan, in priority order. */
-export const DEFAULT_LEAGUES = [
-  'ENG-Premier League',
-  'ESP-La Liga',
-  'GER-Bundesliga',
-  'ITA-Serie A',
-  'FRA-Ligue 1',
-  'INT-Champions League',
-  'INT-Europa League',
-  'INT-Conference League',
-  'ENG-FA Cup',
-  'ENG-League Cup',
-  'ESP-Copa del Rey',
-  'ITA-Coppa Italia',
-  'FRA-Coupe de France',
-  'ESP-Supercopa de Espana',
-];
+/** Build a report-friendly competition label from a Sofascore tournament block. */
+export function buildCompetitionLabel(tournament: SofascoreTournament | null | undefined): string {
+  const name = tournament?.uniqueTournament?.name ?? tournament?.name ?? '';
+  const alpha3 = tournament?.category?.country?.alpha3;
+  const prefix = alpha3 && COUNTRY_PREFIX[alpha3] ? COUNTRY_PREFIX[alpha3] : 'INT';
+  return name ? `${prefix}-${name}` : '';
+}
 
 /** Sofascore stat key → MatchStats field name. */
 const STAT_MAP: Record<string, keyof MatchStats> = {
@@ -198,13 +188,56 @@ export function sofascoreTeamsMatch(token: string, candidate: string): boolean {
 
 // ── Sofascore API response types ─────────────────────────────────────────────
 
+export interface SofascoreScore {
+  current?: number;
+  display?: number;
+  normaltime?: number;
+  penalties?: number;
+}
+
+export interface SofascoreTeam {
+  id: number;
+  name: string;
+  slug?: string;
+  shortName?: string;
+  country?: { alpha2?: string; alpha3?: string; name?: string };
+}
+
+export interface SofascoreTournamentCategory {
+  name?: string;
+  country?: { alpha2?: string; alpha3?: string; name?: string };
+}
+
+export interface SofascoreTournament {
+  name?: string;
+  uniqueTournament?: { id?: number; name?: string };
+  category?: SofascoreTournamentCategory;
+}
+
 export interface SofascoreEvent {
   id: number;
-  homeTeam: { name: string };
-  awayTeam: { name: string };
+  customId?: string;
+  slug?: string;
+  homeTeam: SofascoreTeam;
+  awayTeam: SofascoreTeam;
+  homeScore?: SofascoreScore;
+  awayScore?: SofascoreScore;
   startTimestamp?: number;
-  homeScore?: { current?: number };
-  awayScore?: { current?: number };
+  status?: { type?: string; description?: string; code?: number };
+  tournament?: SofascoreTournament;
+  season?: { id?: number; year?: string; name?: string };
+}
+
+/** Search API result item. */
+export interface SofascoreSearchResult {
+  entity: {
+    id: number;
+    name: string;
+    slug?: string;
+    sport?: { name?: string };
+    country?: { alpha2?: string; alpha3?: string; name?: string };
+  };
+  type: string;
 }
 
 export interface SofascoreStatisticsResponse {
@@ -411,31 +444,42 @@ export function parseSofascoreLineups(data: SofascoreLineupsResponse, isHome: bo
   };
 }
 
-// ── Schedule row → MatchDetails / H2HMatch builders ─────────────────────────
+// ── SofascoreEvent → MatchDetails / H2HMatch builders ──────────────────────
 
-export interface ScheduleRow {
-  date: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeScore: number;
-  awayScore: number;
-  league: string;
-  gameId: number;
+/** Extract the scoreline excluding penalty-shootout tallies. */
+function extractScore(score: SofascoreScore | undefined): number | null {
+  // `current` adds penalty-shootout penalties to the scoreline (e.g. a 2-2
+  // match decided 12-11 on pens is stored as 14-13). `display` and
+  // `normaltime` reflect the on-pitch result.
+  return score?.display ?? score?.normaltime ?? score?.current ?? null;
 }
 
-/** Build a MatchDetails skeleton from a schedule row. */
-export function buildMatchFromSchedule(row: ScheduleRow, team: string): MatchDetails & { game_id: number } {
-  const isHome = teamMatches(team, row.homeTeam);
-  const opponent = isHome ? row.awayTeam : row.homeTeam;
-  const venue = isHome ? 'H' : 'A';
-  const teamScore = isHome ? row.homeScore : row.awayScore;
-  const oppScore = isHome ? row.awayScore : row.homeScore;
+/** ISO date (YYYY-MM-DD) from a Sofascore Unix timestamp (seconds). */
+function timestampToDate(ts: number | undefined): string {
+  if (!ts) return '';
+  return new Date(ts * 1000).toISOString().slice(0, 10);
+}
+
+/** Build a MatchDetails skeleton from a Sofascore event for a given team. */
+export function buildMatchFromEvent(
+  ev: SofascoreEvent,
+  teamId: number,
+): (MatchDetails & { game_id: number }) | null {
+  const homeId = ev.homeTeam?.id;
+  const awayId = ev.awayTeam?.id;
+  if (homeId == null || awayId == null) return null;
+  const isHome = homeId === teamId;
+  if (!isHome && awayId !== teamId) return null;
+
+  const teamScore = isHome ? extractScore(ev.homeScore) : extractScore(ev.awayScore);
+  const oppScore = isHome ? extractScore(ev.awayScore) : extractScore(ev.homeScore);
+  if (teamScore == null || oppScore == null) return null;
 
   return {
-    date: row.date,
-    opponent,
-    competition: row.league,
-    venue,
+    date: timestampToDate(ev.startTimestamp),
+    opponent: isHome ? ev.awayTeam.name : ev.homeTeam.name,
+    competition: buildCompetitionLabel(ev.tournament),
+    venue: isHome ? 'H' : 'A',
     formation: null,
     starting_lineup: [],
     starters_subbed_off: [],
@@ -452,25 +496,31 @@ export function buildMatchFromSchedule(row: ScheduleRow, team: string): MatchDet
     card_events: [],
     opponent_card_events: [],
     extras: {},
-    game_id: row.gameId,
+    game_id: ev.id,
   };
 }
 
-/** Build an H2HMatch skeleton from a schedule row. */
-export function buildH2HFromSchedule(
-  row: ScheduleRow,
-  teamA: string,
-  teamB: string,
-): H2HMatch & { game_id: number; team_a_is_home: boolean } {
-  const aIsHome = teamMatches(teamA, row.homeTeam);
-  const venue = aIsHome ? `${teamA} Home` : `${teamB} Home`;
-  const aScore = aIsHome ? row.homeScore : row.awayScore;
-  const bScore = aIsHome ? row.awayScore : row.homeScore;
+/** Build an H2HMatch skeleton from a Sofascore event, with team A as primary. */
+export function buildH2HFromEvent(
+  ev: SofascoreEvent,
+  teamAId: number,
+  teamAName: string,
+  teamBName: string,
+): (H2HMatch & { game_id: number; team_a_is_home: boolean }) | null {
+  const homeId = ev.homeTeam?.id;
+  const awayId = ev.awayTeam?.id;
+  if (homeId == null || awayId == null) return null;
+  const aIsHome = homeId === teamAId;
+  if (!aIsHome && awayId !== teamAId) return null;
+
+  const aScore = aIsHome ? extractScore(ev.homeScore) : extractScore(ev.awayScore);
+  const bScore = aIsHome ? extractScore(ev.awayScore) : extractScore(ev.homeScore);
+  if (aScore == null || bScore == null) return null;
 
   return {
-    date: row.date,
-    venue,
-    competition: row.league,
+    date: timestampToDate(ev.startTimestamp),
+    venue: aIsHome ? `${teamAName} Home` : `${teamBName} Home`,
+    competition: buildCompetitionLabel(ev.tournament),
     teamA_formation: null,
     teamA_lineup: [],
     teamA_starters_subbed_off: [],
@@ -492,7 +542,7 @@ export function buildH2HFromSchedule(
     teamB_goal_events: [],
     teamA_card_events: [],
     teamB_card_events: [],
-    game_id: row.gameId,
+    game_id: ev.id,
     team_a_is_home: aIsHome,
   };
 }

@@ -1,19 +1,26 @@
 /**
  * sofascore-provider — DataProvider backed by Playwright + Sofascore API.
  *
- * Uses SofascoreClient (browser-based) for all Sofascore data, replacing the
- * Python soccerdata library which gets 403 from datacenter IPs.
+ * Uses per-team endpoints instead of scanning all leagues:
+ *   - team names resolve to numeric IDs via `search/all?q=...&type=team`
+ *   - recent matches come from `team/{id}/events/last/0` (≈30 per page)
+ *   - H2H history comes from `event/{customId}/h2h/events`; the customId is
+ *     discovered from an upcoming or recent match between the two teams.
+ *
+ * A full pre-game collection (20 matches per side + last-2-seasons H2H)
+ * makes roughly 2 search + 2 last-events + 1 next-events + 1 H2H + ~140
+ * enrichment calls. All fetches are disk-cached under `data/cache/sofascore/`.
  */
 
 import { DataProvider } from './data-provider';
 import { MatchDetails, H2HMatch } from '../types';
 import { SofascoreClient } from './sofascore-client';
 import {
-  ScheduleRow,
+  SofascoreEvent,
   teamMatches,
   sofascoreTeamsMatch,
-  buildMatchFromSchedule,
-  buildH2HFromSchedule,
+  buildMatchFromEvent,
+  buildH2HFromEvent,
   parseSofascoreStats,
   parseSofascoreIncidents,
   parseSofascoreLineups,
@@ -30,16 +37,17 @@ import type {
   SofascoreStatItem,
 } from './soccerdata-provider';
 
+/** Cutoff age for H2H matches — matches the "last 2 seasons" report label. */
+const H2H_MAX_AGE_YEARS = 2;
+
 export class SofascoreProvider implements DataProvider {
   readonly name = 'sofascore';
   private client: SofascoreClient;
-  private schedule: ScheduleRow[] | null = null;
 
   constructor(client?: SofascoreClient) {
     this.client = client ?? new SofascoreClient();
   }
 
-  /** Initialize the browser. Must be called before any data methods. */
   async init(): Promise<void> {
     await this.client.init();
   }
@@ -50,66 +58,81 @@ export class SofascoreProvider implements DataProvider {
 
   // ── DataProvider interface ──────────────────────────────────────────────
 
+  /** Resolve a team name to its Sofascore numeric ID via the search endpoint. */
   async resolveTeamId(teamName: string): Promise<string | null> {
-    return teamName.trim() || null;
+    const results = await this.client.searchTeams(teamName);
+    const football = results.filter(r => r.entity.sport?.name === 'Football');
+    if (football.length === 0) {
+      console.error(`[sofascore] No football search results for "${teamName}"`);
+      return null;
+    }
+
+    // Prefer a fuzzy-alias match, then fall back to the top-ranked football hit.
+    const matched = football.find(r => teamMatches(teamName, r.entity.name));
+    const chosen = matched ?? football[0];
+    const suffix = matched ? '' : ' [best guess]';
+    console.error(`[sofascore] Resolved "${teamName}" → ${chosen.entity.name} (id ${chosen.entity.id})${suffix}`);
+    return String(chosen.entity.id);
   }
 
+  /** Fetch the most recent completed matches for a team across all competitions. */
   async getRecentMatches(teamId: string, limit: number): Promise<MatchDetails[]> {
-    const schedule = await this.getSchedule();
-    const now = new Date();
+    const numericId = parseInt(teamId, 10);
+    if (!Number.isFinite(numericId)) {
+      console.error(`[sofascore] getRecentMatches got non-numeric teamId "${teamId}"`);
+      return [];
+    }
 
-    // Filter for this team's completed matches
-    const teamRows = schedule.filter(row => {
-      if (!teamMatches(teamId, row.homeTeam) && !teamMatches(teamId, row.awayTeam)) return false;
-      if (!row.date) return false;
-      return new Date(row.date) <= now;
-    });
+    const events = await this.collectFinishedEvents(numericId, limit);
+    const matches: Array<MatchDetails & { game_id: number }> = [];
+    for (const ev of events) {
+      const built = buildMatchFromEvent(ev, numericId);
+      if (built) matches.push(built);
+      if (matches.length >= limit) break;
+    }
 
-    // Sort by date descending, take limit
-    teamRows.sort((a, b) => b.date.localeCompare(a.date));
-    const rows = teamRows.slice(0, limit);
-
-    // Build match skeletons
-    const matches = rows.map(row => buildMatchFromSchedule(row, teamId));
-
-    // Enrich each match with stats/incidents/lineups
     await this.enrichMatches(matches);
-
     return matches;
   }
 
+  /** Fetch H2H history via the dedicated endpoint, filtered to the last 2 seasons. */
   async getH2HMatches(
     teamAId: string,
     teamBId: string,
     teamAName: string,
     teamBName: string,
   ): Promise<H2HMatch[]> {
-    const schedule = await this.getSchedule();
-    const now = new Date();
+    const aId = parseInt(teamAId, 10);
+    const bId = parseInt(teamBId, 10);
+    if (!Number.isFinite(aId) || !Number.isFinite(bId)) return [];
 
-    const h2hRows = schedule.filter(row => {
-      const aHome = teamMatches(teamAName, row.homeTeam);
-      const aAway = teamMatches(teamAName, row.awayTeam);
-      const bHome = teamMatches(teamBName, row.homeTeam);
-      const bAway = teamMatches(teamBName, row.awayTeam);
-      if (!((aHome && bAway) || (aAway && bHome))) return false;
-      if (!row.date) return false;
-      return new Date(row.date) <= now;
-    });
+    const customId = await this.findPairCustomId(aId, bId);
+    if (!customId) {
+      console.error(`[sofascore] No customId found for H2H ${aId} vs ${bId}`);
+      return [];
+    }
 
-    h2hRows.sort((a, b) => b.date.localeCompare(a.date));
+    const events = await this.client.getH2HEvents(customId);
 
-    const matches = h2hRows.map(row => buildH2HFromSchedule(row, teamAName, teamBName));
+    const cutoff = Date.now() / 1000 - H2H_MAX_AGE_YEARS * 365.25 * 86400;
+    const filtered = events
+      .filter(ev => ev.status?.type === 'finished')
+      .filter(ev => (ev.startTimestamp ?? 0) >= cutoff)
+      .sort((a, b) => (b.startTimestamp ?? 0) - (a.startTimestamp ?? 0));
 
-    // Enrich each H2H match
-    await this.enrichH2HMatches(matches, teamAName, teamBName);
+    const matches: Array<H2HMatch & { game_id: number; team_a_is_home: boolean }> = [];
+    for (const ev of filtered) {
+      const built = buildH2HFromEvent(ev, aId, teamAName, teamBName);
+      if (built) matches.push(built);
+    }
 
+    await this.enrichH2HMatches(matches);
     return matches;
   }
 
   // ── Sofascore-specific methods (used by HybridProvider / collectors) ────
 
-  /** Find a Sofascore event ID for a match on a given date. */
+  /** Find the Sofascore event ID for a match on a given date. */
   async findEventId(teamA: string, teamB: string, matchDate: string): Promise<number | null> {
     const events = await this.client.getScheduledEvents(matchDate);
     for (const event of events) {
@@ -179,13 +202,50 @@ export class SofascoreProvider implements DataProvider {
 
   // ── Internal helpers ───────────────────────────────────────────────────
 
-  private async getSchedule(): Promise<ScheduleRow[]> {
-    if (!this.schedule) {
-      console.error('[sofascore] Fetching schedule via Playwright...');
-      this.schedule = await this.client.getFullSchedule();
-      console.error(`[sofascore] Loaded ${this.schedule.length} matches from schedule`);
+  /**
+   * Collect finished events for a team, newest first, paging until we have
+   * enough (or the API runs out). Each page returns ~30 events; for a 20-match
+   * window on an active club, page 0 alone is almost always sufficient.
+   */
+  private async collectFinishedEvents(teamId: number, needed: number): Promise<SofascoreEvent[]> {
+    const collected: SofascoreEvent[] = [];
+    const seen = new Set<number>();
+    const MAX_PAGES = 4; // 4 × ~30 ≈ 120 events — plenty of history
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const { events, hasNextPage } = await this.client.getTeamEventsLast(teamId, page);
+      for (const ev of events) {
+        if (seen.has(ev.id)) continue;
+        if (ev.status?.type !== 'finished') continue;
+        seen.add(ev.id);
+        collected.push(ev);
+      }
+      if (collected.length >= needed + 5 || !hasNextPage) break;
     }
-    return this.schedule;
+
+    collected.sort((a, b) => (b.startTimestamp ?? 0) - (a.startTimestamp ?? 0));
+    return collected;
+  }
+
+  /**
+   * Discover a customId for H2H between two teams.
+   * Checks upcoming matches first (cheap hit for a scheduled fixture), then
+   * falls back to recent matches.
+   */
+  private async findPairCustomId(teamAId: number, teamBId: number): Promise<string | null> {
+    const hit = (ev: SofascoreEvent): boolean => {
+      const h = ev.homeTeam?.id;
+      const a = ev.awayTeam?.id;
+      return (h === teamAId && a === teamBId) || (h === teamBId && a === teamAId);
+    };
+
+    const upcoming = await this.client.getTeamEventsNext(teamAId, 0);
+    const upcomingMatch = upcoming.events.find(hit);
+    if (upcomingMatch?.customId) return upcomingMatch.customId;
+
+    const recent = await this.client.getTeamEventsLast(teamAId, 0);
+    const recentMatch = recent.events.find(hit);
+    return recentMatch?.customId ?? null;
   }
 
   private async enrichMatches(matches: Array<MatchDetails & { game_id: number }>): Promise<void> {
@@ -194,33 +254,23 @@ export class SofascoreProvider implements DataProvider {
       const isHome = match.venue === 'H';
 
       const statsData = await this.client.getEventStatistics(match.game_id);
-      if (statsData) {
-        const parsed = parseSofascoreStats(statsData, isHome);
-        applyStatsToMatch(match, parsed);
-      }
+      if (statsData) applyStatsToMatch(match, parseSofascoreStats(statsData, isHome));
 
       const incidentsData = await this.client.getEventIncidents(match.game_id);
-      if (incidentsData) {
-        applyIncidentsToMatch(match, parseSofascoreIncidents(incidentsData, isHome));
-      }
+      if (incidentsData) applyIncidentsToMatch(match, parseSofascoreIncidents(incidentsData, isHome));
 
       const lineupData = await this.client.getEventLineups(match.game_id);
-      if (lineupData) {
-        applyLineupsToMatch(match, parseSofascoreLineups(lineupData, isHome));
-      }
+      if (lineupData) applyLineupsToMatch(match, parseSofascoreLineups(lineupData, isHome));
     }
   }
 
   private async enrichH2HMatches(
     matches: Array<H2HMatch & { game_id: number; team_a_is_home: boolean }>,
-    teamA: string,
-    teamB: string,
   ): Promise<void> {
     for (const h2h of matches) {
       if (!h2h.game_id) continue;
       const aIsHome = h2h.team_a_is_home;
 
-      // Stats
       const statsData = await this.client.getEventStatistics(h2h.game_id);
       if (statsData) {
         const parsedA = parseSofascoreStats(statsData, aIsHome);
@@ -239,7 +289,6 @@ export class SofascoreProvider implements DataProvider {
         }
       }
 
-      // Incidents
       const incidentsData = await this.client.getEventIncidents(h2h.game_id);
       if (incidentsData) {
         const parsedA = parseSofascoreIncidents(incidentsData, aIsHome);
@@ -256,7 +305,6 @@ export class SofascoreProvider implements DataProvider {
         if (parsedB.substitutes.length > 0) h2h.teamB_substitutes = parsedB.substitutes;
       }
 
-      // Lineups
       const lineupData = await this.client.getEventLineups(h2h.game_id);
       if (lineupData) {
         const parsedALineup = parseSofascoreLineups(lineupData, aIsHome);
