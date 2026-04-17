@@ -138,19 +138,18 @@ function renderDatePills() {
     pill.className = 'date-pill' + (idx === currentDateIdx ? ' active' : '');
     const d = new Date(page.date + 'T12:00:00Z');
     const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+    const monthName = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
     const dayNum = d.getUTCDate();
+    const topSpan = document.createElement('span');
+    topSpan.className = 'date-pill-day';
     if (page.date === todayStr) {
       pill.classList.add('today');
-      const todayLabel = document.createElement('span');
-      todayLabel.className = 'date-pill-today';
-      todayLabel.textContent = 'Today';
-      pill.appendChild(todayLabel);
+      topSpan.classList.add('date-pill-today');
+      topSpan.textContent = `Today · ${monthName}`;
     } else {
-      const daySpan = document.createElement('span');
-      daySpan.className = 'date-pill-day';
-      daySpan.textContent = dayName;
-      pill.appendChild(daySpan);
+      topSpan.textContent = `${dayName} · ${monthName}`;
     }
+    pill.appendChild(topSpan);
     const numSpan = document.createElement('span');
     numSpan.className = 'date-pill-num';
     numSpan.textContent = dayNum;
