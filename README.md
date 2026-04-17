@@ -16,7 +16,7 @@ Given two teams and a match date, the tool:
 6. **Collects post-game results** — after the match, fetches actual results and generates a narrative summary
 7. **Reviews the prediction** — identifies which picks hit or missed and why, enabling iterative improvement
 
-Every step is its own agent skill. The **corners** market is proven in production; the **goals** market is wired up but untested and still needs refinement.
+Every step is its own agent skill. The **corners** market is tested in production; the **goals** market is wired up but untested.
 
 ## Tech stack
 
