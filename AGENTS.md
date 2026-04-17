@@ -2,22 +2,18 @@
 
 ## Project Overview
 
-TypeScript CLI + web dashboard for multi-market soccer betting prediction (corners, goals, cards). Each market has a pre-match flow (data → prediction → presentation) and a post-match flow (results → review → review presentation).
+TypeScript CLI + web dashboard for soccer betting prediction. Three market pipelines exist in code (corners, goals, cards), but only **corners** is production-ready end-to-end. Goals is wired up and runnable but unproven; cards has prediction/review prompts but no odds agent. Each market has a pre-game flow (data → news → odds → prediction → presentation) and a post-game flow (results → review → review presentation).
 
-**Data collection**:
+**Pre-game pipeline**:
 
-1. **HybridProvider** — Composes two data sources: (a) **SofascoreProvider** — TypeScript + Playwright browser client fetches Sofascore API (schedule, lineups, corners, goals, cards, stats) via `page.evaluate(fetch(...))`, bypassing datacenter IP blocks; (b) **UnderstatBridge** — slimmed Python subprocess for Understat-only data (xG, npxG, PPDA, deep completions) via the `soccerdata` library.
+1. **HybridProvider** — composes two data sources: (a) **SofascoreProvider** — TypeScript + Playwright browser client fetches Sofascore API (schedule, lineups, corners, goals, cards, shots, fouls, stats) via `page.evaluate(fetch(...))`, bypassing datacenter IP blocks; (b) **UnderstatBridge** — slimmed Python subprocess for Understat-only data (xG, npxG, PPDA, deep completions) via the `soccerdata` library.
 2. **Match news agent** — Claude Code CLI agent with web search fetches absences, injuries, and tactical news.
 3. **Corner odds agent** (corners pipeline only) — Claude Code CLI agent that combines The Odds API, sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.), and third-party comparison sites (sportsgambler.com, etc.).
 4. **Goal odds agent** (goals pipeline) — Claude Code CLI agent that combines The Odds API and sportsbook website scraping via Playwright (DraftKings, FanDuel, etc.) for goal markets (moneyline, totals, spreads, BTTS, double chance).
+5. **Prediction agent** — Claude Opus reads the collected report via `claude --print`, performs statistical analysis, models market totals, and compares predictions against sportsbook lines to find +EV value picks. Each market has its own prediction system prompt.
+6. **Presentation agent** — rewrites the prediction into an audience-ready summary; hides methodology and presents picks with authoritative tone.
 
-**Prediction** — Claude Opus reads the collected report via `claude --print` to perform statistical analysis, model market totals, and compare predictions against sportsbook lines to find value picks. Each market has its own prediction system prompt.
-
-**Presentation** — After prediction or review, a presentation agent rewrites the output into an audience-ready summary. Hides data sources, model internals, and academic hedging; presents picks with authoritative AI-expert tone.
-
-**Post-match flow** — After kickoff, `:results` re-runs the data provider against the finished match and layers a Claude-generated narrative on top. `:review` scores the original prediction against the actual result and is followed by a review presentation.
-
-Output per match: `{market}.md`, `{market}-prediction.md`, `{market}-prediction-presentation.md`, `{market}-results.md`, `{market}-review.md`, `{market}-review-presentation.md`, plus shared `news.md`, `corner-odds.md` / `goal-odds.md`, and `meta.json`.
+**Post-game pipeline**: `:review <match-dir>` runs `collectMatchResults` (re-runs HybridProvider against the finished match + Claude narrative agent) → `analyzeReport` with the review prompt (compares prediction against actuals) → presentation agent.
 
 ## Architecture
 
@@ -26,7 +22,17 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
  |
  +-- runPipeline (src/cli-shared.ts) — dispatches on mode flag
      |
-     +-- [default: collect] Promise.all([
+     +-- [--predict-pipeline] full pre-game (data + news + odds + prediction)
+     |    +-- collect mode with forceFull=true
+     |    +-- ALWAYS runs all stages — no env gating
+     |
+     +-- [--review-pipeline] full post-game (results + review)
+     |    +-- review mode with collectResultsFirst=true
+     |
+     +-- [collect (default) | --predict | --news | --agent-odds | --results | --review] per-stage runs
+     |    +-- each invokes exactly one stage of the pipeline
+     |
+     +-- Promise.all([
      |     MatchDataCollector (src/collector/match-data-collector.ts)
      |     |  +-- DataProvider interface (src/provider/data-provider.ts)
      |     |  |    +-- HybridProvider (src/provider/soccerdata-provider.ts)
@@ -38,27 +44,20 @@ CLI (src/cli-corners.ts | cli-goals.ts | cli-cards.ts)
      |     |  |                   +-- sd.Understat
      |     |  +-- MarkdownFormatter (src/formatter/) -> base report
      |     |
-     |     runMatchNews (src/agent/match-news-client.ts) [if NEWS_FETCHING=true]
-     |     |  +-- Claude Code CLI agent with web search -> news markdown
-     |     |
-     |     runCornerOdds (src/agent/corner-odds-client.ts) [if ODDS_FETCHING=true]
-     |     |  +-- Claude Code CLI agent -> Odds API + Playwright + 3rd-party -> odds markdown
-     |     |
-     |     runGoalOdds (src/agent/goal-odds-client.ts) [if ODDS_FETCHING=true]
-     |        +-- Claude Code CLI agent -> Odds API + Playwright -> odds markdown
+     |     runMatchNews (src/agent/match-news-client.ts)        [run only when forceFull]
+     |     runCornerOdds | runGoalOdds (src/agent/*-odds-client.ts)  [run only when forceFull]
      |   ])
      |   -> base report + news section + odds section (string concat)
+     |   -> runPrediction (run only when forceFull)
+     |        +-- Claude Opus -> {market}-prediction.md
+     |        +-- runPresentation -> {market}-prediction-presentation.md
      |
-     +-- [--predict] runPrediction (src/cli-shared.ts) [also runs inline if PREDICTION_ENABLED=true]
-     |    +-- Claude Opus -> {market}-prediction.md
-     |    +-- runPresentation -> {market}-prediction-presentation.md
-     |
-     +-- [--results] collectMatchResults (src/collector/match-results-collector.ts)
+     +-- collectMatchResults (src/collector/match-results-collector.ts)  [--results | inside --review-pipeline]
      |    +-- HybridProvider -> structured post-match stats
      |    +-- Claude CLI narrative agent -> {market}-results.md
      |
-     +-- [--review] runReview (src/cli-shared.ts)
-          +-- Claude Opus (prediction + results as input) -> {market}-review.md
+     +-- analyzeReport(reviewPrompt) [--review | inside --review-pipeline]
+          +-- prediction + results -> Claude Opus -> {market}-review.md
           +-- runPresentation -> {market}-review-presentation.md
 
 Web (scripts/build-web.ts -> dist/)
@@ -69,7 +68,7 @@ Web (scripts/build-web.ts -> dist/)
  +-- Frontend fetches manifest.json + pre-rendered HTML files
 ```
 
-Data collection, news, and odds all run in `Promise.all` — no serial bottleneck. News and odds are appended to the base report via string concatenation.
+Data collection, news, and odds run in `Promise.all` — no serial bottleneck. News and odds are appended to the base report via string concatenation.
 
 ### Provider layer (src/provider/)
 
@@ -100,12 +99,13 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 - `goal-odds-client.ts` — runs a Claude Code CLI agent (`claude --print`) that collects goal odds from two sources: The Odds API (via curl) and sportsbook websites (via Playwright). Returns a `## Goal Odds` markdown section.
 - `prompts/corner-odds-system-prompt.ts` — system prompt for corner odds agent.
 - `prompts/goal-odds-system-prompt.ts` — system prompt for goal odds agent.
+- (Cards has no odds agent yet.)
 
 ### Prediction agent (src/agent/)
 
 - `report-analyzer.ts` — prediction entry point, shells out to `claude --print`. Uses system prompts from `prompts/`. Accepts optional `model` and `effort` overrides.
 - `claude-cli.ts` — shared helper for running prompts via `claude --print`.
-- `prompts/` — market-specific prediction prompts (corners, goals, cards), presentation prompts (`presentation-prediction-system-prompt.ts`, `presentation-review-system-prompt.ts`), and review/results prompts (`review-analysis-system-prompt.ts`, `results-narrative-system-prompt.ts`).
+- `prompts/` — market-specific prediction prompts (`corner-prediction-system-prompt.ts`, `goal-prediction-system-prompt.ts`, `card-prediction-system-prompt.ts`), presentation prompts (`presentation-prediction-system-prompt.ts`, `presentation-review-system-prompt.ts`), and review/results prompts (`review-analysis-system-prompt.ts`, `results-narrative-system-prompt.ts`).
 
 ### Match news agent (src/agent/)
 
@@ -113,7 +113,7 @@ Data collection, news, and odds all run in `Promise.all` — no serial bottlenec
 
 ### Post-match collector (src/collector/)
 
-- `match-results-collector.ts` — invoked by `--results`. Re-runs `HybridProvider` against the finished match to capture actual stats, then hands the structured data to a Claude CLI narrative agent (system prompt `results-narrative-system-prompt.ts`) that writes a concise match story. Output: `{market}-results.md`.
+- `match-results-collector.ts` — invoked by `--results` and `--review-pipeline`. Re-runs `HybridProvider` against the finished match to capture actual stats, then hands the structured data to a Claude CLI narrative agent (system prompt `results-narrative-system-prompt.ts`) that writes a concise match story. Output: `{market}-results.md`.
 
 ### Web (public/, scripts/build-web.ts)
 
@@ -132,39 +132,39 @@ npm run web            # build + serve locally at http://localhost:3001
 npm run build          # build only (writes dist/)
 ```
 
-Vercel deployment: `git push` to the deploy branch triggers auto-deploy. Vercel runs `vercel-build` → `npm run build`. Config in `vercel.json` (outputDirectory: `dist`, SPA fallback to `index.html`).
+Vercel deployment: `git push` to the deploy branch (`prod`) triggers auto-deploy. Vercel runs `vercel-build` → `npm run build`. Config in `vercel.json` (outputDirectory: `dist`, SPA fallback to `index.html`).
 
 ## CLI Commands
 
-Match date is auto-resolved via the Odds API when running the full pipeline, so only team names are required.
+Match date is auto-resolved via the Odds API. Two public commands per market and six per-stage commands for advanced use.
+
+### Public commands
 
 ```bash
-# Full pipeline (collect data + generate report, optionally run prediction inline)
-npm run corners "TeamA" "TeamB"
-npm run goals "TeamA" "TeamB"
-npm run cards "TeamA" "TeamB"
+# Pre-game: data + news + odds + prediction (always all stages, no env gating)
+npm run corners:predict "TeamA" "TeamB"
+npm run goals:predict   "TeamA" "TeamB"
+npm run cards:predict   "TeamA" "TeamB"     # no odds agent for cards
 
-# Run prediction on an existing report
-npm run corners:predict <report.md>
-npm run goals:predict <report.md>
-npm run cards:predict <report.md>
+# Post-game: results + review
+npm run corners:review <match-dir>
+npm run goals:review   <match-dir>
+npm run cards:review   <match-dir>
+```
 
-# Fetch match news standalone
-npm run corners:news "TeamA" "TeamB"
-npm run goals:news "TeamA" "TeamB"
-npm run cards:news "TeamA" "TeamB"
+### Per-stage commands (advanced)
 
-# Fetch odds via agent (Odds API + sportsbook scraping)
-npm run corners:odds "TeamA" "TeamB"
-npm run goals:odds "TeamA" "TeamB"
+Each per-stage command runs exactly one pipeline stage — no implicit chaining.
 
-# Post-match: collect results, then review prediction vs actuals
-npm run corners:results <match-dir>
-npm run corners:review  <match-dir>
-npm run goals:results   <match-dir>
-npm run goals:review    <match-dir>
-npm run cards:results   <match-dir>
-npm run cards:review    <match-dir>
+```bash
+npm run corners:data-stage    "TeamA" "TeamB"   # data only
+npm run corners:news-stage    "TeamA" "TeamB"   # news only
+npm run corners:odds-stage    "TeamA" "TeamB"   # odds only
+npm run corners:predict-stage <report.md>       # prediction on existing report
+npm run corners:results-stage <match-dir>       # results only
+npm run corners:review-stage  <match-dir>       # review on existing results
+
+# Same set exists for goals and cards (e.g. goals:data-stage, cards:results-stage)
 ```
 
 `<match-dir>` is the folder name under `data/reports/`, e.g. `arsenal-vs-chelsea-2026-04-20`.
@@ -175,13 +175,12 @@ Secrets go in `.env` (git-ignored). Non-secret defaults live in `.env.defaults` 
 
 | Variable | Purpose |
 |----------|---------|
-| `THE_ODDS_API_KEY` | Betting odds (required for odds fetching and match-date resolution) |
-| `NEWS_FETCHING` | When `true`, news agent runs inline during the data pipeline. Otherwise use `:news`. |
-| `ODDS_FETCHING` | When `true`, odds agent runs inline during the data pipeline (corners and goals). Otherwise use `:odds`. |
-| `PREDICTION_ENABLED` | When `true`, prediction runs automatically after data collection |
+| `THE_ODDS_API_KEY` | Betting odds + match-date resolution (required) |
 | `PREDICTION_MODEL` | Claude model for prediction (default: `claude-opus-4-6`) |
 | `PRESENTATION_MODEL` | Claude model for presentation rewrites (default: `claude-opus-4-6`) |
 | `WEB_SEARCH_MODEL` | Claude model for the news web-search agent (default: `claude-opus-4-6`) |
+
+There are no env-var gates for stage chaining — public `:predict` and `:review` always run their full pipeline, and `:*-stage` commands always run exactly one stage.
 
 ## Output files
 
@@ -202,6 +201,3 @@ All outputs live under `data/reports/{teamA}-vs-{teamB}-{date}/`.
 
 ## Code conventions
 - **No inline values**: never hardcode prompts, env var names, or configuration values inline in consuming code. Always define them in a centralized module and import from there. System prompts live in `src/agent/prompts/`, market configs in `src/odds/market-config.ts`, etc.
-
-## Known limitations
-- **Team name display**: `unslug()` fallback produces approximate names (e.g. "Borussia Monchengladbach" without umlaut). Accurate names require a markdown H1 title line or `meta.json`.

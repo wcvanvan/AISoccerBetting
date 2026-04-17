@@ -34,7 +34,7 @@ export interface PipelineConfig {
   toolName: string;
   /** Market label for display, e.g. "Corner" or "Goal" */
   marketLabel: string;
-  /** Optional function to collect odds via agent. Runs in parallel during collection when ODDS_FETCHING=true. */
+  /** Optional function to collect odds via agent. Invoked by --predict-pipeline; the standalone --agent-odds flag also calls it. */
   runOddsAgent?: (homeTeam: string, awayTeam: string, date: string, sportKey: string, eventId: string) => Promise<string>;
   /** Output filename for agent odds, e.g. 'corner-odds.md' or 'goal-odds.md' */
   oddsAgentFilename?: string;
@@ -50,6 +50,8 @@ type CollectArgs = {
   mode: 'collect';
   teamA: string;
   teamB: string;
+  /** When true, force-run news + odds + prediction (used by the public predict pipeline). */
+  forceFull?: boolean;
 };
 
 type PredictArgs = {
@@ -77,6 +79,8 @@ type ResultsArgs = {
 type ReviewArgs = {
   mode: 'review';
   matchDir: string;
+  /** When true, collect post-game results first (used by the public review pipeline). */
+  collectResultsFirst?: boolean;
 };
 
 type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | AgentOddsArgs | ResultsArgs | ReviewArgs | null;
@@ -85,6 +89,30 @@ type ParsedArgs = CollectArgs | PredictArgs | NewsArgs | AgentOddsArgs | Results
 
 function parseArgs(toolName: string, marketLabel: string): ParsedArgs {
   const argv = process.argv.slice(2);
+
+  // --predict-pipeline teamA teamB  (full pre-game: data + news + odds + prediction)
+  const predictPipelineIdx = argv.indexOf('--predict-pipeline');
+  if (predictPipelineIdx !== -1) {
+    const [teamA, teamB] = argv.slice(predictPipelineIdx + 1, predictPipelineIdx + 3);
+    if (!teamA || !teamB) {
+      console.error('Error: --predict-pipeline requires two arguments: teamA teamB');
+      printUsage(toolName, marketLabel);
+      return null;
+    }
+    return { mode: 'collect', teamA: teamA.trim(), teamB: teamB.trim(), forceFull: true };
+  }
+
+  // --review-pipeline <match-dir>  (full post-game: results + review)
+  const reviewPipelineIdx = argv.indexOf('--review-pipeline');
+  if (reviewPipelineIdx !== -1) {
+    const matchDir = argv[reviewPipelineIdx + 1];
+    if (!matchDir) {
+      console.error('Error: --review-pipeline requires a match directory name');
+      printUsage(toolName, marketLabel);
+      return null;
+    }
+    return { mode: 'review', matchDir: matchDir.trim(), collectResultsFirst: true };
+  }
 
   // --predict <report.md>
   const predictIdx = argv.indexOf('--predict');
@@ -170,13 +198,17 @@ function printUsage(toolName: string, marketLabel: string): void {
 Soccer Betting Predictor — ${marketLabel} Markets
 ${'='.repeat(42 + marketLabel.length)}
 
-Usage:
-  npm run ${toolName} "TeamA" "TeamB"             Collect data (date auto-resolved from Odds API)
-  npm run ${toolName}:predict <report.md>         Run prediction on existing report → {slug}-prediction.md
-  npm run ${toolName}:news "TeamA" "TeamB"        Fetch match news → {slug}-news.md
-  npm run ${toolName}:odds "TeamA" "TeamB"        Collect ${marketLabel.toLowerCase()} odds via agent (API + sportsbooks)
-  npm run ${toolName}:results <match-dir>         Collect post-game results (soccerdata + CLI narrative)
-  npm run ${toolName}:review <match-dir>          Generate review (compare forecast vs actuals)
+Public commands:
+  npm run ${toolName}:predict "TeamA" "TeamB"     Full pre-game pipeline (data + news + odds + prediction)
+  npm run ${toolName}:review <match-dir>          Full post-game pipeline (results + review)
+
+Per-stage commands (advanced):
+  npm run ${toolName}:data-stage    "TeamA" "TeamB"   Collect match data only
+  npm run ${toolName}:news-stage    "TeamA" "TeamB"   Fetch match news only
+  npm run ${toolName}:odds-stage    "TeamA" "TeamB"   Fetch ${marketLabel.toLowerCase()} odds via agent only
+  npm run ${toolName}:predict-stage <report.md>       Run prediction on existing report
+  npm run ${toolName}:results-stage <match-dir>       Collect post-game results only
+  npm run ${toolName}:review-stage  <match-dir>       Generate review on existing results only
 
 Arguments:
   TeamA      - Name of the first team (e.g., "Manchester United")
@@ -428,8 +460,18 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
       const reviewDir = path.dirname(reviewPath);
       if (!fs.existsSync(reviewDir)) fs.mkdirSync(reviewDir, { recursive: true });
 
-      if (!fs.existsSync(resultsPath)) {
-        console.error(`Error: ${toolName}-results.md not found. Run "${toolName}:results ${args.matchDir}" first.`);
+      if (args.collectResultsFirst) {
+        console.log(`Collecting ${toolName} results for ${meta.homeTeam} vs ${meta.awayTeam}...`);
+        const resultsMarkdown = await collectMatchResults({
+          matchDir: args.matchDir,
+          meta,
+          market: toolName,
+          narrativePrompt: pipelineConfig.resultsCollectionPrompt,
+        });
+        fs.writeFileSync(resultsPath, resultsMarkdown, 'utf8');
+        console.log(`Results saved → ${resultsPath}`);
+      } else if (!fs.existsSync(resultsPath)) {
+        console.error(`Error: ${toolName}-results.md not found. Run "${toolName}:results-stage ${args.matchDir}" first.`);
         process.exit(1);
       }
 
@@ -481,13 +523,13 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
         eventId: resolved.event.id,
         sportKey: resolved.sportKey,
       }),
-      config.newsFetching
+      args.forceFull
         ? runMatchNews(args.teamA, args.teamB, resolved.date).catch((err) => {
             console.error(`Match news skipped: ${errorMsg(err)}`);
             return undefined;
           })
         : Promise.resolve(undefined),
-      pipelineConfig.runOddsAgent && config.oddsFetching
+      pipelineConfig.runOddsAgent && args.forceFull
         ? pipelineConfig.runOddsAgent(
             resolved.event.home_team,
             resolved.event.away_team,
@@ -523,7 +565,7 @@ export async function runPipeline(pipelineConfig: PipelineConfig): Promise<void>
     });
     console.log(`Report saved → ${reportFilename}`);
 
-    if (config.predictionEnabled) {
+    if (args.forceFull) {
       try {
         const predictionFilename = path.join(REPORTS_DIR, _buildPredictionFilename(args.teamA, args.teamB, resolved.date, toolName));
         const predictionOutput = await runPrediction(markdown, predictionFilename, predictionPrompt, marketLabel);

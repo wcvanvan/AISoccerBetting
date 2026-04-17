@@ -8,24 +8,7 @@ function optionalEnv(key: string): string | undefined {
   return process.env[key]?.trim() || undefined;
 }
 
-function envBool(key: string): boolean {
-  const val = optionalEnv(key);
-  return val === 'true' || val === '1';
-}
-
 export const config = {
-  get newsFetching(): boolean {
-    return envBool('NEWS_FETCHING');
-  },
-
-  get oddsFetching(): boolean {
-    return envBool('ODDS_FETCHING');
-  },
-
-  get predictionEnabled(): boolean {
-    return envBool('PREDICTION_ENABLED');
-  },
-
   prediction: {
     get model(): string {
       return optionalEnv('PREDICTION_MODEL') ?? 'claude-opus-4-6';
